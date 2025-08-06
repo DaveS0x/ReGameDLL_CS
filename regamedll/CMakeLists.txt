@@ -140,7 +140,7 @@ elseif (CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR CMAKE_CXX_COMPILER_ID STREQUAL "
 	endif()
 endif()
 
-if (NOT DEBUG AND NOT ANDROID AND NOT APPLE)
+if (NOT DEBUG AND NOT ANDROID)
 	set(LINK_FLAGS "${LINK_FLAGS} \
 		-Wl,-gc-sections -Wl,--version-script=\"${PROJECT_SOURCE_DIR}/../version_script.lds\"")
 endif()
@@ -354,7 +354,13 @@ if (CMAKE_BUILD_TYPE MATCHES Unittests)
 	set(LINK_FLAGS "${LINK_FLAGS} -no-pie -Wl,--no-export-dynamic")
 	add_executable(regamedll ${appversion.sh})
 else()
-	add_library(regamedll SHARED ${appversion.sh})
+	if (XASH_EMSCRIPTEN)
+		add_executable(regamedll ${appversion.sh})
+		target_compile_options(regamedll PRIVATE -fPIC -fvisibility=hidden)
+		target_link_options(regamedll PRIVATE -sSIDE_MODULE=1)
+	else ()
+		add_library(regamedll MODULE ${appversion.sh})
+	endif ()
 endif()
 
 if (NOT TARGET appversion)
@@ -442,9 +448,18 @@ if (XASH_COMPAT)
 		if (CMAKE_SIZEOF_VOID_P EQUAL 8)
 			target_compile_definitions(regamedll PRIVATE XASH_64BIT)
 		endif()
-		set_target_postfix_with_name(regamedll mp)
+		set_target_properties(regamedll PROPERTIES
+			PREFIX ""
+			OUTPUT_NAME mp${POSTFIX})
+	elseif (XASH_EMSCRIPTEN)
+		set_target_properties(regamedll PROPERTIES
+				PREFIX ""
+				OUTPUT_NAME cs${POSTFIX}
+				SUFFIX ".wasm")
 	else()
-		set_target_postfix_with_name(regamedll cs)
+		set_target_properties(regamedll PROPERTIES
+			PREFIX ""
+			OUTPUT_NAME cs${POSTFIX})
 	endif()
 elseif (WIN32)
 	set_target_properties(regamedll PROPERTIES
