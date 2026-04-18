@@ -2905,20 +2905,36 @@ void EXT_FUNC InternalCommand(edict_t *pEntity, const char *pcmd, const char *pa
 
 			case Menu_ChooseTeam:
 			{
-				if (canOpenOldMenu() && !HandleMenu_ChooseTeam(pPlayer, slot))
+				if (canOpenOldMenu())
 				{
-					pPlayer->m_iMenu = Menu_ChooseTeam;
-					if (pPlayer->m_iJoiningState == JOINED)
-						ShowVGUIMenu(pPlayer, VGUI_Menu_Team, (MENU_KEY_1 | MENU_KEY_2 | MENU_KEY_5 | MENU_KEY_0), "#IG_Team_Select");
+					if (HandleMenu_ChooseTeam(pPlayer, slot))
+					{
+						if (slot != MENU_SLOT_TEAM_VIP && slot != MENU_SLOT_TEAM_SPECT && !pPlayer->m_bIsVIP)
+						{
+							HandleMenu_ChooseAppearance(pPlayer, 6);
+						}
+					}
 					else
-						ShowVGUIMenu(pPlayer, VGUI_Menu_Team, (MENU_KEY_1 | MENU_KEY_2 | MENU_KEY_5), "#Team_Select");
+					{
+						pPlayer->m_iMenu = Menu_ChooseTeam;
+						if (pPlayer->m_iJoiningState == JOINED)
+							ShowVGUIMenu(pPlayer, VGUI_Menu_Team, (MENU_KEY_1 | MENU_KEY_2 | MENU_KEY_5 | MENU_KEY_0), "#IG_Team_Select");
+						else
+							ShowVGUIMenu(pPlayer, VGUI_Menu_Team, (MENU_KEY_1 | MENU_KEY_2 | MENU_KEY_5), "#Team_Select");
+					}
 				}
 				break;
 			}
 			case Menu_IGChooseTeam:
 			{
 				if (canOpenOldMenu()) {
-					HandleMenu_ChooseTeam(pPlayer, slot);
+					if (HandleMenu_ChooseTeam(pPlayer, slot))
+					{
+						if (slot != MENU_SLOT_TEAM_VIP && slot != MENU_SLOT_TEAM_SPECT && !pPlayer->m_bIsVIP)
+						{
+							HandleMenu_ChooseAppearance(pPlayer, 6);
+						}
+					}
 				}
 				break;
 			}
@@ -3370,7 +3386,9 @@ void EXT_FUNC InternalCommand(edict_t *pEntity, const char *pcmd, const char *pa
 #endif
 				}
 				else
-					pPlayer->m_iMenu = Menu_ChooseAppearance;
+				{
+					HandleMenu_ChooseAppearance(pPlayer, 6);
+				}
 			}
 			else
 			{
