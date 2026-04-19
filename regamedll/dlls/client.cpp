@@ -103,6 +103,33 @@ char *sPlayerModelFiles[] =
 
 bool g_skipCareerInitialSpawn = false;
 
+static const char *JoinDebugPlayerName(CBasePlayer *pPlayer)
+{
+	if (!pPlayer || !pPlayer->pev)
+	{
+		return "<null>";
+	}
+
+	const char *playerName = STRING(pPlayer->pev->netname);
+	return (playerName && playerName[0] != '\0') ? playerName : "<unconnected>";
+}
+
+static void JoinDebugLog(const char *stage, CBasePlayer *pPlayer, int slot = -1, int handled = -2)
+{
+	ALERT(at_console,
+		"[join-debug] %s name=%s ent=%d userid=%d slot=%d handled=%d team=%d deadflag=%d menu=%d join=%d\n",
+		stage,
+		JoinDebugPlayerName(pPlayer),
+		pPlayer ? pPlayer->entindex() : -1,
+		pPlayer ? GETPLAYERUSERID(pPlayer->edict()) : -1,
+		slot,
+		handled,
+		pPlayer ? pPlayer->m_iTeam : -1,
+		(pPlayer && pPlayer->pev) ? int(pPlayer->pev->deadflag) : -1,
+		pPlayer ? pPlayer->m_iMenu : -1,
+		pPlayer ? pPlayer->m_iJoiningState : -1);
+}
+
 static entity_field_alias_t entity_field_alias[] =
 {
 	{ "origin[0]", 0 },
@@ -1614,6 +1641,8 @@ LINK_HOOK_VOID_CHAIN(HandleMenu_ChooseAppearance, (CBasePlayer *pPlayer, int slo
 
 void EXT_FUNC __API_HOOK(HandleMenu_ChooseAppearance)(CBasePlayer *pPlayer, int slot)
 {
+	JoinDebugLog("HandleMenu_ChooseAppearance:entry", pPlayer, slot);
+
 	int numSkins = AreRunningCZero() ? CZ_NUM_SKIN : CS_NUM_SKIN;
 
 	struct
@@ -1765,6 +1794,8 @@ void EXT_FUNC __API_HOOK(HandleMenu_ChooseAppearance)(CBasePlayer *pPlayer, int 
 			pPlayer->MakeVIP();
 		}
 	}
+
+	JoinDebugLog("HandleMenu_ChooseAppearance:exit", pPlayer, slot);
 }
 
 LINK_HOOK_CHAIN(BOOL, HandleMenu_ChooseTeam, (CBasePlayer *pPlayer, int slot), pPlayer, slot)
@@ -1773,6 +1804,8 @@ LINK_HOOK_CHAIN(BOOL, HandleMenu_ChooseTeam, (CBasePlayer *pPlayer, int slot), p
 // can be closed...false if the menu should be displayed again
 BOOL EXT_FUNC __API_HOOK(HandleMenu_ChooseTeam)(CBasePlayer *pPlayer, int slot)
 {
+	JoinDebugLog("HandleMenu_ChooseTeam:entry", pPlayer, slot);
+
 	// If this player is a VIP, don't allow him to switch teams/appearances unless the following conditions are met :
 	// a) There is another TEAM_CT player who is in the queue to be a VIP
 	// b) This player is dead
@@ -1784,6 +1817,7 @@ BOOL EXT_FUNC __API_HOOK(HandleMenu_ChooseTeam)(CBasePlayer *pPlayer, int slot)
 			ClientPrint(pPlayer->pev, HUD_PRINTCENTER, "#Cannot_Switch_From_VIP");
 			CLIENT_COMMAND(ENT(pPlayer->pev), "slot10\n");
 
+			JoinDebugLog("HandleMenu_ChooseTeam:vip-block-alive", pPlayer, slot, TRUE);
 			return TRUE;
 		}
 		else if (CSGameRules()->IsVIPQueueEmpty())
@@ -1791,6 +1825,7 @@ BOOL EXT_FUNC __API_HOOK(HandleMenu_ChooseTeam)(CBasePlayer *pPlayer, int slot)
 			ClientPrint(pPlayer->pev, HUD_PRINTCENTER, "#Cannot_Switch_From_VIP");
 			CLIENT_COMMAND(ENT(pPlayer->pev), "slot10\n");
 
+			JoinDebugLog("HandleMenu_ChooseTeam:vip-block-empty-queue", pPlayer, slot, TRUE);
 			return TRUE;
 		}
 	}
@@ -1815,6 +1850,7 @@ BOOL EXT_FUNC __API_HOOK(HandleMenu_ChooseTeam)(CBasePlayer *pPlayer, int slot)
 		}
 		else
 		{
+			JoinDebugLog("HandleMenu_ChooseTeam:vip-invalid", pPlayer, slot, FALSE);
 			return FALSE;
 		}
 		break;
@@ -1863,12 +1899,14 @@ BOOL EXT_FUNC __API_HOOK(HandleMenu_ChooseTeam)(CBasePlayer *pPlayer, int slot)
 			ClientPrint(pPlayer->pev, HUD_PRINTCENTER, "#Cannot_Be_Spectator");
 			CLIENT_COMMAND(ENT(pPlayer->pev), "slot10\n");
 
+			JoinDebugLog("HandleMenu_ChooseTeam:spectator-blocked", pPlayer, slot, FALSE);
 			return FALSE;
 		}
 
 		// are we already a spectator?
 		if (pPlayer->m_iTeam == SPECTATOR)
 		{
+			JoinDebugLog("HandleMenu_ChooseTeam:already-spectator", pPlayer, slot, TRUE);
 			return TRUE;
 		}
 
@@ -1954,6 +1992,7 @@ BOOL EXT_FUNC __API_HOOK(HandleMenu_ChooseTeam)(CBasePlayer *pPlayer, int slot)
 				UTIL_ScreenFade(pPlayer, Vector(0, 0, 0), 0.001, 0, 0, FFADE_IN);
 			}
 
+			JoinDebugLog("HandleMenu_ChooseTeam:spectator-accepted", pPlayer, slot, TRUE);
 			return TRUE;
 		}
 		else
@@ -1961,12 +2000,14 @@ BOOL EXT_FUNC __API_HOOK(HandleMenu_ChooseTeam)(CBasePlayer *pPlayer, int slot)
 			ClientPrint(pPlayer->pev, HUD_PRINTCENTER, "#Cannot_Be_Spectator");
 			CLIENT_COMMAND(ENT(pPlayer->pev), "slot10\n");
 
+			JoinDebugLog("HandleMenu_ChooseTeam:spectator-denied", pPlayer, slot, FALSE);
 			return FALSE;
 		}
 
 		break;
 	}
 	default:
+		JoinDebugLog("HandleMenu_ChooseTeam:invalid-slot", pPlayer, slot, FALSE);
 		return FALSE;
 	}
 
@@ -1990,6 +2031,7 @@ BOOL EXT_FUNC __API_HOOK(HandleMenu_ChooseTeam)(CBasePlayer *pPlayer, int slot)
 		if (!madeRoom)
 		{
 			ClientPrint(pPlayer->pev, HUD_PRINTCENTER, (team == TERRORIST) ? "#Terrorists_Full" : "#CTs_Full");
+			JoinDebugLog("HandleMenu_ChooseTeam:team-full", pPlayer, slot, FALSE);
 			return FALSE;
 		}
 	}
@@ -1999,6 +2041,7 @@ BOOL EXT_FUNC __API_HOOK(HandleMenu_ChooseTeam)(CBasePlayer *pPlayer, int slot)
 	{
 		// The specified team is full
 		ClientPrint(pPlayer->pev, HUD_PRINTCENTER, (team == TERRORIST) ? "#Too_Many_Terrorists" : "#Too_Many_CTs");
+		JoinDebugLog("HandleMenu_ChooseTeam:team-stacked", pPlayer, slot, FALSE);
 		return FALSE;
 	}
 
@@ -2026,6 +2069,7 @@ BOOL EXT_FUNC __API_HOOK(HandleMenu_ChooseTeam)(CBasePlayer *pPlayer, int slot)
 #else
 			ClientPrint(pPlayer->pev, HUD_PRINTCENTER, (team == TERRORIST) ? "#Humans_Join_Team_CT" : "#Humans_Join_Team_T");
 #endif
+			JoinDebugLog("HandleMenu_ChooseTeam:humans-join-team-block", pPlayer, slot, FALSE);
 			return FALSE;
 		}
 	}
@@ -2036,6 +2080,7 @@ BOOL EXT_FUNC __API_HOOK(HandleMenu_ChooseTeam)(CBasePlayer *pPlayer, int slot)
 		if (pPlayer->pev->deadflag != DEAD_NO)
 		{
 			ClientPrint(pPlayer->pev, HUD_PRINTCENTER, "#Only_1_Team_Change");
+			JoinDebugLog("HandleMenu_ChooseTeam:one-team-change", pPlayer, slot, FALSE);
 			return FALSE;
 		}
 	}
@@ -2140,6 +2185,7 @@ BOOL EXT_FUNC __API_HOOK(HandleMenu_ChooseTeam)(CBasePlayer *pPlayer, int slot)
 		(STRING(pPlayer->pev->netname) && STRING(pPlayer->pev->netname)[0] != 0) ? STRING(pPlayer->pev->netname) : "<unconnected>");
 
 	UTIL_LogPrintf("\"%s<%i><%s><%s>\" joined team \"%s\"\n", STRING(pPlayer->pev->netname), GETPLAYERUSERID(pPlayer->edict()), GETPLAYERAUTHID(pPlayer->edict()), szOldTeam, szNewTeam);
+	JoinDebugLog("HandleMenu_ChooseTeam:success", pPlayer, slot, TRUE);
 	return TRUE;
 }
 
@@ -3368,8 +3414,12 @@ void EXT_FUNC InternalCommand(edict_t *pEntity, const char *pcmd, const char *pa
 		}
 		else if (FStrEq(pcmd, "jointeam"))
 		{
+			int slot = Q_atoi(parg1);
+			JoinDebugLog("jointeam:entry", pPlayer, slot);
+
 			if (pPlayer->m_iMenu == Menu_ChooseAppearance)
 			{
+				JoinDebugLog("jointeam:blocked-choose-appearance", pPlayer, slot, FALSE);
 				ClientPrint(pPlayer->pev, HUD_PRINTCENTER, "#Command_Not_Available");
 				return;
 			}
@@ -3382,10 +3432,13 @@ void EXT_FUNC InternalCommand(edict_t *pEntity, const char *pcmd, const char *pa
 			if (pPlayer->m_iJoiningState != JOINED && pPlayer->m_iJoiningState != PICKINGTEAM && pPlayer->m_iJoiningState != GETINTOGAME)
 			{
 				pPlayer->m_iJoiningState = PICKINGTEAM;
+				JoinDebugLog("jointeam:forced-pickingteam", pPlayer, slot);
 			}
 
-			int slot = Q_atoi(parg1);
-			if (HandleMenu_ChooseTeam(pPlayer, slot))
+			BOOL handled = HandleMenu_ChooseTeam(pPlayer, slot);
+			JoinDebugLog("jointeam:after-handle-team", pPlayer, slot, handled);
+
+			if (handled)
 			{
 				if (slot == MENU_SLOT_TEAM_VIP || slot == MENU_SLOT_TEAM_SPECT || pPlayer->m_bIsVIP)
 				{
@@ -3398,6 +3451,7 @@ void EXT_FUNC InternalCommand(edict_t *pEntity, const char *pcmd, const char *pa
 				else
 				{
 					HandleMenu_ChooseAppearance(pPlayer, 6);
+					JoinDebugLog("jointeam:after-auto-appearance", pPlayer, slot, TRUE);
 				}
 			}
 			else
@@ -3407,18 +3461,24 @@ void EXT_FUNC InternalCommand(edict_t *pEntity, const char *pcmd, const char *pa
 					ShowVGUIMenu(pPlayer, VGUI_Menu_Team, (MENU_KEY_1 | MENU_KEY_2 | MENU_KEY_5 | MENU_KEY_0), "#IG_Team_Select");
 				else
 					ShowVGUIMenu(pPlayer, VGUI_Menu_Team, (MENU_KEY_1 | MENU_KEY_2 | MENU_KEY_5), "#Team_Select");
+
+				JoinDebugLog("jointeam:reopened-team-menu", pPlayer, slot, FALSE);
 			}
 		}
 		else if (FStrEq(pcmd, "joinclass"))
 		{
 			int slot = Q_atoi(parg1);
+			JoinDebugLog("joinclass:entry", pPlayer, slot);
+
 			if (pPlayer->m_iMenu != Menu_ChooseAppearance)
 			{
+				JoinDebugLog("joinclass:blocked-wrong-menu", pPlayer, slot, FALSE);
 				ClientPrint(pPlayer->pev, HUD_PRINTCENTER, "#Command_Not_Available");
 				return;
 			}
 
 			HandleMenu_ChooseAppearance(pPlayer, slot);
+			JoinDebugLog("joinclass:after-appearance", pPlayer, slot, TRUE);
 		}
 		else if (pPlayer->pev->deadflag == DEAD_NO)
 		{

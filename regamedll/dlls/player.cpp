@@ -30,6 +30,57 @@
 
 BOOL gInitHUD = TRUE;
 
+static int g_joinDebugLastJoiningThinkState[MAX_CLIENTS + 1];
+static int g_joinDebugLastJoiningThinkMenu[MAX_CLIENTS + 1];
+static float g_joinDebugLastJoiningThinkLogTime[MAX_CLIENTS + 1];
+
+static const char *JoinDebugPlayerName(CBasePlayer *pPlayer)
+{
+	if (!pPlayer || !pPlayer->pev)
+	{
+		return "<null>";
+	}
+
+	const char *playerName = STRING(pPlayer->pev->netname);
+	return (playerName && playerName[0] != '\0') ? playerName : "<unconnected>";
+}
+
+static void JoinDebugLog(const char *stage, CBasePlayer *pPlayer)
+{
+	ALERT(at_console,
+		"[join-debug] %s name=%s ent=%d userid=%d team=%d deadflag=%d menu=%d join=%d\n",
+		stage,
+		JoinDebugPlayerName(pPlayer),
+		pPlayer ? pPlayer->entindex() : -1,
+		pPlayer ? GETPLAYERUSERID(pPlayer->edict()) : -1,
+		pPlayer ? pPlayer->m_iTeam : -1,
+		(pPlayer && pPlayer->pev) ? int(pPlayer->pev->deadflag) : -1,
+		pPlayer ? pPlayer->m_iMenu : -1,
+		pPlayer ? pPlayer->m_iJoiningState : -1);
+}
+
+static void JoinDebugLogJoiningThink(CBasePlayer *pPlayer)
+{
+	int playerIndex = pPlayer ? pPlayer->entindex() : 0;
+	if (playerIndex <= 0 || playerIndex > MAX_CLIENTS)
+	{
+		JoinDebugLog("JoiningThink:entry", pPlayer);
+		return;
+	}
+
+	if (g_joinDebugLastJoiningThinkState[playerIndex] == pPlayer->m_iJoiningState
+		&& g_joinDebugLastJoiningThinkMenu[playerIndex] == pPlayer->m_iMenu
+		&& gpGlobals->time - g_joinDebugLastJoiningThinkLogTime[playerIndex] < 1.0f)
+	{
+		return;
+	}
+
+	g_joinDebugLastJoiningThinkState[playerIndex] = pPlayer->m_iJoiningState;
+	g_joinDebugLastJoiningThinkMenu[playerIndex] = pPlayer->m_iMenu;
+	g_joinDebugLastJoiningThinkLogTime[playerIndex] = gpGlobals->time;
+	JoinDebugLog("JoiningThink:entry", pPlayer);
+}
+
 TYPEDESCRIPTION CBasePlayer::m_playerSaveData[] =
 {
 	DEFINE_FIELD(CBasePlayer, m_flFlashLightTime, FIELD_TIME),
@@ -3739,6 +3790,8 @@ LINK_HOOK_CLASS_VOID_CHAIN2(CBasePlayer, JoiningThink)
 
 void EXT_FUNC CBasePlayer::__API_HOOK(JoiningThink)()
 {
+	JoinDebugLogJoiningThink(this);
+
 	switch (m_iJoiningState)
 	{
 		case JOINED:
