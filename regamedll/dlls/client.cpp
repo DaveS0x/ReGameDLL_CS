@@ -3374,6 +3374,16 @@ void EXT_FUNC InternalCommand(edict_t *pEntity, const char *pcmd, const char *pa
 				return;
 			}
 
+			// When jointeam is issued directly (e.g. from a web HUD) the
+			// player may still be in READINGLTEXT or SHOWTEAMSELECT because
+			// the native VGUI menu flow that normally advances the state
+			// was suppressed.  Advance to PICKINGTEAM so that
+			// HandleMenu_ChooseAppearance can transition to GETINTOGAME.
+			if (pPlayer->m_iJoiningState != JOINED && pPlayer->m_iJoiningState != PICKINGTEAM && pPlayer->m_iJoiningState != GETINTOGAME)
+			{
+				pPlayer->m_iJoiningState = PICKINGTEAM;
+			}
+
 			int slot = Q_atoi(parg1);
 			if (HandleMenu_ChooseTeam(pPlayer, slot))
 			{
