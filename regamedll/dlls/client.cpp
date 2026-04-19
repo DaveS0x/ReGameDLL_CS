@@ -116,18 +116,29 @@ static const char *JoinDebugPlayerName(CBasePlayer *pPlayer)
 
 static void JoinDebugLog(const char *stage, CBasePlayer *pPlayer, int slot = -1, int handled = -2)
 {
+	if (pPlayer && pPlayer->pev)
+	{
+		UTIL_LogPrintf(
+			"\"%s<%i><%s><%s>\" triggered \"JoinDebug\" (stage \"%s\") (slot \"%d\") (handled \"%d\") (teamnum \"%d\") (deadflag \"%d\") (menu \"%d\") (join \"%d\")\n",
+			JoinDebugPlayerName(pPlayer),
+			GETPLAYERUSERID(pPlayer->edict()),
+			GETPLAYERAUTHID(pPlayer->edict()),
+			GetTeam(pPlayer->m_iTeam),
+			stage,
+			slot,
+			handled,
+			pPlayer->m_iTeam,
+			int(pPlayer->pev->deadflag),
+			pPlayer->m_iMenu,
+			pPlayer->m_iJoiningState);
+		return;
+	}
+
 	UTIL_LogPrintf(
-		"[join-debug] %s name=%s ent=%d userid=%d slot=%d handled=%d team=%d deadflag=%d menu=%d join=%d\n",
+		"World triggered \"JoinDebug\" (stage \"%s\") (slot \"%d\") (handled \"%d\")\n",
 		stage,
-		JoinDebugPlayerName(pPlayer),
-		pPlayer ? pPlayer->entindex() : -1,
-		pPlayer ? GETPLAYERUSERID(pPlayer->edict()) : -1,
 		slot,
-		handled,
-		pPlayer ? pPlayer->m_iTeam : -1,
-		(pPlayer && pPlayer->pev) ? int(pPlayer->pev->deadflag) : -1,
-		pPlayer ? pPlayer->m_iMenu : -1,
-		pPlayer ? pPlayer->m_iJoiningState : -1);
+		handled);
 }
 
 static entity_field_alias_t entity_field_alias[] =
