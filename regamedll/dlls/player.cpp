@@ -47,7 +47,7 @@ static const char *JoinDebugPlayerName(CBasePlayer *pPlayer)
 
 static void JoinDebugLog(const char *stage, CBasePlayer *pPlayer)
 {
-	ALERT(at_console,
+	UTIL_LogPrintf(
 		"[join-debug] %s name=%s ent=%d userid=%d team=%d deadflag=%d menu=%d join=%d\n",
 		stage,
 		JoinDebugPlayerName(pPlayer),
