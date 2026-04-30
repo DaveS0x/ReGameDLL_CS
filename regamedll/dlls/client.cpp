@@ -23,6 +23,7 @@ int gmsgAmmoX = 0;
 int gmsgDeathMsg = 0;
 int gmsgScoreAttrib = 0;
 int gmsgScoreInfo = 0;
+int gmsgAssistInfo = 0;
 int gmsgTeamInfo = 0;
 int gmsgTeamScore = 0;
 int gmsgGameMode = 0;
@@ -165,6 +166,7 @@ void LinkUserMessages()
 	gmsgDeathMsg      = REG_USER_MSG("DeathMsg", -1);
 	gmsgScoreAttrib   = REG_USER_MSG("ScoreAttrib", 2);
 	gmsgScoreInfo     = REG_USER_MSG("ScoreInfo", 9);
+	gmsgAssistInfo    = REG_USER_MSG("AssistInfo", 3);
 	gmsgTeamInfo      = REG_USER_MSG("TeamInfo", -1);
 	gmsgTeamScore     = REG_USER_MSG("TeamScore", -1);
 	gmsgGameMode      = REG_USER_MSG("GameMode", 1);
@@ -265,6 +267,25 @@ void WriteSigonMessages()
 			WRITE_BYTE(iFlags);
 		MESSAGE_END();
 	}
+}
+
+void SendAssistInfo(CBasePlayer *pPlayer, edict_t *pRecipient)
+{
+	if (!pPlayer || !gmsgAssistInfo)
+		return;
+
+	if (pRecipient)
+	{
+		MESSAGE_BEGIN(MSG_ONE, gmsgAssistInfo, nullptr, pRecipient);
+	}
+	else
+	{
+		MESSAGE_BEGIN(MSG_ALL, gmsgAssistInfo);
+	}
+
+	WRITE_BYTE(pPlayer->entindex());
+	WRITE_SHORT(pPlayer->m_iAssists);
+	MESSAGE_END();
 }
 
 int CMD_ARGC_()

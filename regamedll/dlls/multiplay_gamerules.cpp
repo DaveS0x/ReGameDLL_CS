@@ -3423,6 +3423,7 @@ void CHalfLifeMultiplay::InitHUD(CBasePlayer *pl)
 		WRITE_SHORT(0);
 		WRITE_SHORT(pl->m_iTeam);
 	MESSAGE_END();
+	SendAssistInfo(pl, pl->edict());
 
 	MESSAGE_BEGIN(MSG_ONE, gmsgShadowIdx, nullptr, pl->edict());
 		WRITE_LONG(g_iShadowSprite);
@@ -3453,6 +3454,7 @@ void CHalfLifeMultiplay::InitHUD(CBasePlayer *pl)
 			WRITE_SHORT(0);
 			WRITE_SHORT(plr->m_iTeam);
 		MESSAGE_END();
+		SendAssistInfo(plr, pl->edict());
 	}
 
 	MESSAGE_BEGIN(MSG_ONE, gmsgTeamScore, nullptr, pl->edict());
@@ -4138,6 +4140,12 @@ void EXT_FUNC CHalfLifeMultiplay::__API_HOOK(DeathNotice)(CBasePlayer *pVictim, 
 		if (IsFreeForAll() || !pKiller || PlayerRelationship(pKiller, pVictim) == GR_TEAMMATE)
 			iDeathMessageFlags &= ~PLAYERDEATH_POSITION; // do not send a position
 #endif
+
+		if (pAssister)
+		{
+			pAssister->m_iAssists++;
+			SendAssistInfo(pAssister);
+		}
 
 		SendDeathMessage(pKiller, pVictim, pAssister, pevInflictor, killer_weapon_name, iDeathMessageFlags, iRarityOfKill);
 
@@ -5221,10 +5229,21 @@ bool CHalfLifeMultiplay::CanPlayerBuy(CBasePlayer *pPlayer) const
 CBasePlayer *CHalfLifeMultiplay::CheckAssistsToKill(CBaseEntity *pKiller, CBasePlayer *pVictim, bool &bFlashAssist)
 {
 #ifdef REGAMEDLL_ADD
+	if (!pKiller || !pKiller->IsPlayer() || !pVictim)
+		return nullptr;
+
+	CBasePlayer *pKillerPlayer = static_cast<CBasePlayer *>(pKiller);
+	if (pKillerPlayer == pVictim)
+		return nullptr;
+
+	if (!IsFreeForAll() && PlayerRelationship(pKillerPlayer, pVictim) == GR_TEAMMATE)
+		return nullptr;
+
 	CCSPlayer::DamageList_t &victimDamageTakenList = pVictim->CSPlayer()->GetDamageList();
 
 	float maxDamage = 0.0f;
 	int   maxDamageIndex = -1;
+	int   maxDamageTieCount = 0;
 	CBasePlayer *maxDamagePlayer = nullptr;
 
 	// Find the best assistant
@@ -5245,16 +5264,35 @@ CBasePlayer *CHalfLifeMultiplay::CheckAssistsToKill(CBaseEntity *pKiller, CBaseP
 		if (pAttackerPlayer == pKiller || pAttackerPlayer == pVictim)
 			continue; // ignore involved as killer or victim
 
-		if (record.flDamage > maxDamage)
+		if (!IsFreeForAll())
 		{
-			// If the assistant used a flash grenade to aid in the kill,
-			// make sure that the victim was blinded, and that the duration of the flash effect is still preserved
-			if (record.flFlashDurationTime > 0 && (!pVictim->IsBlind() || record.flFlashDurationTime <= gpGlobals->time))
+			if (PlayerRelationship(pAttackerPlayer, pVictim) == GR_TEAMMATE)
 				continue;
 
+			if (PlayerRelationship(pAttackerPlayer, pKillerPlayer) != GR_TEAMMATE)
+				continue;
+		}
+
+		// If the assistant used a flash grenade to aid in the kill,
+		// make sure that the victim was blinded, and that the duration of the flash effect is still preserved
+		if (record.flFlashDurationTime > 0 && (!pVictim->IsBlind() || record.flFlashDurationTime <= gpGlobals->time))
+			continue;
+
+		if (record.flDamage > maxDamage)
+		{
 			maxDamage        = record.flDamage;
 			maxDamagePlayer  = pAttackerPlayer;
 			maxDamageIndex   = i;
+			maxDamageTieCount = 1;
+		}
+		else if (record.flDamage == maxDamage && maxDamagePlayer)
+		{
+			maxDamageTieCount++;
+			if (RANDOM_LONG(1, maxDamageTieCount) == 1)
+			{
+				maxDamagePlayer = pAttackerPlayer;
+				maxDamageIndex  = i;
+			}
 		}
 	}
 

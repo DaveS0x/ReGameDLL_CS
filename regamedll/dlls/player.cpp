@@ -6161,6 +6161,8 @@ void CBasePlayer::Reset()
 {
 	pev->frags = 0;
 	m_iDeaths = 0;
+	m_iAssists = 0;
+	SendAssistInfo(this);
 
 #ifndef REGAMEDLL_ADD
 	m_iAccount = 0;
@@ -6700,6 +6702,7 @@ void CBasePlayer::ForceClientDllUpdate()
 			WRITE_SHORT(0);
 			WRITE_SHORT(pPlayer->m_iTeam);
 		MESSAGE_END();
+		SendAssistInfo(pPlayer, edict());
 
 		// Update player attributes DEAD, BOMB, VIP etc
 		pPlayer->SetScoreAttrib(this);

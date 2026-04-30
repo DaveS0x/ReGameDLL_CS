@@ -232,6 +232,7 @@ extern int gmsgAmmoX;
 extern int gmsgDeathMsg;
 extern int gmsgScoreAttrib;
 extern int gmsgScoreInfo;
+extern int gmsgAssistInfo;
 extern int gmsgTeamInfo;
 extern int gmsgTeamScore;
 extern int gmsgGameMode;
@@ -292,3 +293,6 @@ extern int gmsgFog;
 extern int gmsgShowTimer;
 extern int gmsgAccount;
 extern int gmsgHealthInfo;
+
+class CBasePlayer;
+void SendAssistInfo(CBasePlayer *pPlayer, edict_t *pRecipient = nullptr);
