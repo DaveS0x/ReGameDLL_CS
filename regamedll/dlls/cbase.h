@@ -256,6 +256,7 @@ public:
 	// We use this variables to store each ammo count.
 	// let's sacrifice this unused member, for its own needs in favor of m_pEntity
 	int *current_ammo;
+	unsigned char m_ucDmgPenetrationLevel;
 #endif
 
 	float currentammo;
@@ -344,9 +345,17 @@ inline CCSEntity *CBaseEntity::CSEntity() const
 #else // !REGAMEDLL_API
 
 extern entvars_t *g_pevLastInflictor;
-inline void CBaseEntity::SetDmgPenetrationLevel(int iPenetrationLevel) {}
-inline void CBaseEntity::ResetDmgPenetrationLevel() {}
-inline int CBaseEntity::GetDmgPenetrationLevel() const { return 0; }
+inline void CBaseEntity::SetDmgPenetrationLevel(int iPenetrationLevel)
+{
+	if (iPenetrationLevel < 0)
+		iPenetrationLevel = 0;
+	else if (iPenetrationLevel > 255)
+		iPenetrationLevel = 255;
+
+	m_ucDmgPenetrationLevel = static_cast<unsigned char>(iPenetrationLevel);
+}
+inline void CBaseEntity::ResetDmgPenetrationLevel() { m_ucDmgPenetrationLevel = 0; }
+inline int CBaseEntity::GetDmgPenetrationLevel() const { return m_ucDmgPenetrationLevel; }
 inline entvars_t *CBaseEntity::GetLastInflictor() { return g_pevLastInflictor; }
 inline void CBaseEntity::KilledInflicted(entvars_t *pevInflictor, entvars_t *pevAttacker, int iGib)
 {
