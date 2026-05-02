@@ -170,9 +170,14 @@ void CC4::PrimaryAttack()
 				Broadcast("BOMBPL");
 				m_pPlayer->m_bHasC4 = false;
 
-				if (pev->speed != 0 && CSGameRules())
+				if (CSGameRules())
 				{
-					CSGameRules()->m_iC4Timer = int(pev->speed);
+					int c4Timer = int(CVAR_GET_FLOAT("mp_c4timer"));
+					if (c4Timer > 90)
+						c4Timer = 90;
+					else if (c4Timer < 10)
+						c4Timer = 10;
+					CSGameRules()->m_iC4Timer = c4Timer;
 				}
 
 #ifdef REGAMEDLL_FIXES
@@ -195,6 +200,7 @@ void CC4::PrimaryAttack()
 					WRITE_COORD(pBomb->pev->origin.y);
 					WRITE_COORD(pBomb->pev->origin.z);
 					WRITE_BYTE(BOMB_FLAG_PLANTED);
+					WRITE_SHORT(int(Q_max(0.0f, pBomb->m_flC4Blow - gpGlobals->time)));
 				MESSAGE_END();
 
 				UTIL_ClientPrintAll(HUD_PRINTCENTER, "#Bomb_Planted");
@@ -347,10 +353,15 @@ void CC4::Use(CBaseEntity *pActivator, CBaseEntity *pCaller, USE_TYPE useType, f
 		edict_t *m_pentOldCurBombTarget = pPlayer->m_pentCurBombTarget;
 		pPlayer->m_pentCurBombTarget = nullptr;
 
-		if (pev->speed != 0 && CSGameRules())
-		{
-			CSGameRules()->m_iC4Timer = int(pev->speed);
-		}
+			if (CSGameRules())
+			{
+				int c4Timer = int(CVAR_GET_FLOAT("mp_c4timer"));
+				if (c4Timer > 90)
+					c4Timer = 90;
+				else if (c4Timer < 10)
+					c4Timer = 10;
+				CSGameRules()->m_iC4Timer = c4Timer;
+			}
 
 		EMIT_SOUND(edict(), CHAN_WEAPON, "weapons/c4_plant.wav", VOL_NORM, ATTN_NORM);
 

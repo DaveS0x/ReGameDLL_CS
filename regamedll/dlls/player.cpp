@@ -3600,6 +3600,14 @@ void CBasePlayer::SyncRoundTimer()
 		tmRemaining = CSGameRules()->GetRoundRemainingTimeReal();
 
 #ifdef REGAMEDLL_FIXES
+#ifdef REGAMEDLL_ADD
+		if (HasRoundInfinite(SCENARIO_BLOCK_TIME_EXPRIRED))
+		{
+			m_iHideHUD |= HIDEHUD_TIMER;
+			return;
+		}
+#endif
+
 		// hide timer HUD because it is useless.
 		if (tmRemaining <= 0.0f && CSGameRules()->m_iRoundTime <= 0) {
 			m_iHideHUD |= HIDEHUD_TIMER;
@@ -8426,6 +8434,7 @@ CBaseEntity *EXT_FUNC CBasePlayer::__API_HOOK(DropPlayerItem)(const char *pszIte
 							WRITE_COORD(pev->origin.y);
 							WRITE_COORD(pev->origin.z);
 							WRITE_BYTE(BOMB_FLAG_DROPPED);
+							WRITE_SHORT(0);
 						MESSAGE_END();
 					}
 				}
@@ -10594,6 +10603,7 @@ void CBasePlayer::HideTimer()
 		WRITE_COORD(0);
 		WRITE_COORD(0);
 		WRITE_BYTE(BOMB_FLAG_PLANTED);
+		WRITE_SHORT(0);
 	MESSAGE_END();
 
 	MESSAGE_BEGIN(MSG_ONE, gmsgBombPickup, nullptr, pev);

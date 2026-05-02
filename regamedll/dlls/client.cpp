@@ -201,7 +201,7 @@ void LinkUserMessages()
 	gmsgTutorState    = REG_USER_MSG("TutorState", -1);
 	gmsgTutorClose    = REG_USER_MSG("TutorClose", -1);
 	gmsgAllowSpec     = REG_USER_MSG("AllowSpec", 1);
-	gmsgBombDrop      = REG_USER_MSG("BombDrop", 7);
+	gmsgBombDrop      = REG_USER_MSG("BombDrop", 9);
 	gmsgBombPickup    = REG_USER_MSG("BombPickup", 0);
 	gmsgSendCorpse    = REG_USER_MSG("ClCorpse", -1);
 	gmsgHostagePos    = REG_USER_MSG("HostagePos", 8);

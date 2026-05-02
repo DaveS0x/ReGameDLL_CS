@@ -1876,6 +1876,7 @@ void CWeaponBox::BombThink()
 				WRITE_COORD(pev->origin.y);
 				WRITE_COORD(pev->origin.z);
 				WRITE_BYTE(BOMB_FLAG_DROPPED);
+				WRITE_SHORT(0);
 			MESSAGE_END();
 		}
 	}

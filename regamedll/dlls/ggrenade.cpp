@@ -21,6 +21,16 @@ TYPEDESCRIPTION CGrenade::m_SaveData[] =
 
 LINK_ENTITY_TO_CLASS(grenade, CGrenade, CCSGrenade)
 
+static int CounterSol_GetC4TimerCvarValue()
+{
+	int c4Timer = int(CVAR_GET_FLOAT("mp_c4timer"));
+	if (c4Timer > 90)
+		c4Timer = 90;
+	else if (c4Timer < 10)
+		c4Timer = 10;
+	return c4Timer;
+}
+
 void CGrenade::Explode(Vector vecSrc, Vector vecAim)
 {
 	TraceResult tr;
@@ -1261,6 +1271,7 @@ CGrenade *CGrenade::__API_HOOK(ShootSatchelCharge)(entvars_t *pevOwner, VectorRe
 	pGrenade->pev->nextthink = gpGlobals->time + 0.1f;
 #endif
 
+	CSGameRules()->m_iC4Timer = CounterSol_GetC4TimerCvarValue();
 	pGrenade->m_flC4Blow = gpGlobals->time + CSGameRules()->m_iC4Timer;
 	pGrenade->m_flNextFreqInterval = float(CSGameRules()->m_iC4Timer / 4);
 	pGrenade->m_flNextFreq = gpGlobals->time;

@@ -3531,13 +3531,14 @@ void CHalfLifeMultiplay::InitHUD(CBasePlayer *pl)
 #endif // BUILD_LATEST
 	}
 
-	auto SendMsgBombDrop = [&pl](const int flag, const Vector& pos)
+	auto SendMsgBombDrop = [&pl](const int flag, const Vector& pos, const int c4Time = 0)
 	{
 		MESSAGE_BEGIN(MSG_ONE, gmsgBombDrop, nullptr, pl->edict());
 			WRITE_COORD(pos.x);
 			WRITE_COORD(pos.y);
 			WRITE_COORD(pos.z);
 			WRITE_BYTE(flag);
+			WRITE_SHORT(Q_max(0, c4Time));
 		MESSAGE_END();
 	};
 
@@ -3558,7 +3559,7 @@ void CHalfLifeMultiplay::InitHUD(CBasePlayer *pl)
 			if (bomb->m_bIsC4)
 			{
 				// if the bomb was planted, which will trigger the round timer to hide.
-				SendMsgBombDrop(BOMB_FLAG_PLANTED, bomb->pev->origin);
+				SendMsgBombDrop(BOMB_FLAG_PLANTED, bomb->pev->origin, int(Q_max(0.0f, bomb->m_flC4Blow - gpGlobals->time)));
 
 				if (m_iRoundTime > 0 || GetRoundRemainingTime() >= 1.0f)
 				{
@@ -3568,7 +3569,7 @@ void CHalfLifeMultiplay::InitHUD(CBasePlayer *pl)
 				else
 				{
 					// HACK HACK, we need to hide only the timer.
-					SendMsgBombDrop(BOMB_FLAG_PLANTED, g_vecZero);
+					SendMsgBombDrop(BOMB_FLAG_PLANTED, g_vecZero, 0);
 					MESSAGE_BEGIN(MSG_ONE, gmsgBombPickup, nullptr, pl->pev);
 					MESSAGE_END();
 				}
