@@ -573,13 +573,16 @@ void CCSPlayer::ResetAllStats()
 	}
 
 	m_DamageList.Clear();
+	m_DamageGivenList.Clear();
 }
 
 void CCSPlayer::OnSpawn()
 {
 	m_bGameForcingRespawn = false;
 	m_flRespawnPending = 0.0f;
+	m_iUserID = GETPLAYERUSERID(BasePlayer()->edict());
 	m_DamageList.Clear();
+	m_DamageGivenList.Clear();
 }
 
 void CCSPlayer::OnKilled()
@@ -605,26 +608,51 @@ void CCSPlayer::OnConnect()
 	m_iUserID = GETPLAYERUSERID(BasePlayer()->edict());
 }
 
-// Remember this amount of damage that we dealt for stats
-void CCSPlayer::RecordDamage(CBasePlayer *pAttacker, float flDamage, float flFlashDurationTime)
+// Remember this amount of damage for assists and per-life death recap stats
+void CCSPlayer::RecordDamage(CBasePlayer *pAttacker, float flDamage, float flFlashDurationTime, bool bCountLifeStats)
 {
-	if (!pAttacker || !pAttacker->IsPlayer())
+	if (!pAttacker || !pAttacker->IsPlayer() || flDamage <= 0.0f)
 		return;
 
 	int attackerIndex = pAttacker->entindex() - 1;
 	if (attackerIndex < 0 || attackerIndex >= MAX_CLIENTS)
 		return;
 
-	CCSPlayer *pCSAttacker = pAttacker->CSPlayer();
+	int victimIndex = BasePlayer()->entindex() - 1;
+	if (victimIndex < 0 || victimIndex >= MAX_CLIENTS)
+		return;
 
-	// Accumulate damage
+	CCSPlayer *pCSAttacker = pAttacker->CSPlayer();
+	m_iUserID = GETPLAYERUSERID(BasePlayer()->edict());
+	pCSAttacker->m_iUserID = GETPLAYERUSERID(pAttacker->edict());
+	const int victimUserId = m_iUserID;
+	const int attackerUserId = pCSAttacker->m_iUserID;
+
+	// Accumulate assist weight separately from real per-life HUD damage.
 	CDamageRecord_t &record = m_DamageList[attackerIndex];
-	if (record.flDamage > 0 && record.userId != pCSAttacker->m_iUserID)
-		record.flDamage = 0; // reset damage if attacker became another client
+	if ((record.flDamage > 0.0f || record.flStatsDamage > 0.0f || record.hits > 0 || record.flFlashDurationTime > 0.0f) && record.userId != attackerUserId)
+		record = CDamageRecord_t(); // reset damage if attacker became another client
 
 	record.flDamage += flDamage;
-	record.userId    = pCSAttacker->m_iUserID;
+	record.userId    = attackerUserId;
+	if (bCountLifeStats)
+	{
+		record.flStatsDamage += flDamage;
+		record.hits++;
+	}
 
 	if (flFlashDurationTime > 0)
 		record.flFlashDurationTime = gpGlobals->time + flFlashDurationTime;
+
+	if (!bCountLifeStats)
+		return;
+
+	CDamageRecord_t &givenRecord = pCSAttacker->m_DamageGivenList[victimIndex];
+	if ((givenRecord.flDamage > 0.0f || givenRecord.flStatsDamage > 0.0f || givenRecord.hits > 0) && givenRecord.userId != victimUserId)
+		givenRecord = CDamageRecord_t(); // reset damage if victim became another client
+
+	givenRecord.flDamage += flDamage;
+	givenRecord.flStatsDamage += flDamage;
+	givenRecord.userId    = victimUserId;
+	givenRecord.hits++;
 }

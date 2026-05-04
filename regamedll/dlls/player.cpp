@@ -1046,8 +1046,14 @@ BOOL EXT_FUNC CBasePlayer::__API_HOOK(TakeDamage)(entvars_t *pevInflictor, entva
 				m_bKilledByGrenade = true;
 		}
 
-		LogAttack(pAttack, this, bTeamAttack, int(flDamage), armorHit, pev->health - flDamage, pev->armorvalue, GetKillerWeaponName(pevInflictor, pevAttacker));
-		bTookDamage = CBaseMonster::TakeDamage(pevInflictor, pevAttacker, int(flDamage), bitsDamageType);
+		const int iHealthDamage = int(flDamage);
+
+#ifdef REGAMEDLL_API
+		CSPlayer()->RecordDamage(pAttack, float(iHealthDamage));
+#endif
+
+		LogAttack(pAttack, this, bTeamAttack, iHealthDamage, armorHit, pev->health - flDamage, pev->armorvalue, GetKillerWeaponName(pevInflictor, pevAttacker));
+		bTookDamage = CBaseMonster::TakeDamage(pevInflictor, pevAttacker, iHealthDamage, bitsDamageType);
 
 		if (bTookDamage)
 		{
@@ -1065,9 +1071,6 @@ BOOL EXT_FUNC CBasePlayer::__API_HOOK(TakeDamage)(entvars_t *pevInflictor, entva
 				}
 			}
 
-#ifdef REGAMEDLL_API
-			CSPlayer()->RecordDamage(pAttack, flDamage);
-#endif
 		}
 
 		{
@@ -1301,11 +1304,17 @@ BOOL EXT_FUNC CBasePlayer::__API_HOOK(TakeDamage)(entvars_t *pevInflictor, entva
 	// keep track of amount of damage last sustained
 	m_lastDamageAmount = flDamage;
 
-	LogAttack(pAttack, this, bTeamAttack, flDamage, armorHit, pev->health - flDamage, pev->armorvalue, GetKillerWeaponName(pevInflictor, pevAttacker));
+	const int iHealthDamage = int(flDamage);
+
+#ifdef REGAMEDLL_API
+	CSPlayer()->RecordDamage(pAttack, float(iHealthDamage));
+#endif
+
+	LogAttack(pAttack, this, bTeamAttack, iHealthDamage, armorHit, pev->health - flDamage, pev->armorvalue, GetKillerWeaponName(pevInflictor, pevAttacker));
 
 	// this cast to INT is critical!!! If a player ends up with 0.5 health, the engine will get that
 	// as an int (zero) and think the player is dead! (this will incite a clientside screentilt, etc)
-	bTookDamage = CBaseMonster::TakeDamage(pevInflictor, pevAttacker, int(flDamage), bitsDamageType);
+	bTookDamage = CBaseMonster::TakeDamage(pevInflictor, pevAttacker, iHealthDamage, bitsDamageType);
 
 	if (bTookDamage)
 	{
@@ -1323,9 +1332,6 @@ BOOL EXT_FUNC CBasePlayer::__API_HOOK(TakeDamage)(entvars_t *pevInflictor, entva
 			}
 		}
 
-#ifdef REGAMEDLL_API
-		CSPlayer()->RecordDamage(pAttack, flDamage);
-#endif
 	}
 
 	{

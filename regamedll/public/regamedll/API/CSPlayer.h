@@ -176,13 +176,17 @@ public:
 	struct CDamageRecord_t
 	{
 		float flDamage            = 0.0f;
+		float flStatsDamage       = 0.0f;
 		float flFlashDurationTime = 0.0f;
 		int userId                = -1;
+		int hits                  = 0;
 	};
 	using DamageList_t = CUtlArray<CDamageRecord_t, MAX_CLIENTS>;
 	DamageList_t m_DamageList; // A unified array of recorded damage that includes giver and taker in each entry
+	DamageList_t m_DamageGivenList;
 	DamageList_t &GetDamageList() { return m_DamageList; }
-	void RecordDamage(CBasePlayer *pAttacker, float flDamage, float flFlashDurationTime = -1);
+	DamageList_t &GetDamageGivenList() { return m_DamageGivenList; }
+	void RecordDamage(CBasePlayer *pAttacker, float flDamage, float flFlashDurationTime = -1, bool bCountLifeStats = true);
 	int m_iNumKilledByUnanswered[MAX_CLIENTS]; // [0-31] how many unanswered kills this player has been dealt by each other player
 	bool m_bPlayerDominated[MAX_CLIENTS]; // [0-31] array of state per other player whether player is dominating other players
 

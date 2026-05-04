@@ -24,6 +24,7 @@ int gmsgDeathMsg = 0;
 int gmsgScoreAttrib = 0;
 int gmsgScoreInfo = 0;
 int gmsgAssistInfo = 0;
+int gmsgDeathStats = 0;
 int gmsgTeamInfo = 0;
 int gmsgTeamScore = 0;
 int gmsgGameMode = 0;
@@ -167,6 +168,7 @@ void LinkUserMessages()
 	gmsgScoreAttrib   = REG_USER_MSG("ScoreAttrib", 2);
 	gmsgScoreInfo     = REG_USER_MSG("ScoreInfo", 9);
 	gmsgAssistInfo    = REG_USER_MSG("AssistInfo", 3);
+	gmsgDeathStats    = REG_USER_MSG("DeathStats", -1);
 	gmsgTeamInfo      = REG_USER_MSG("TeamInfo", -1);
 	gmsgTeamScore     = REG_USER_MSG("TeamScore", -1);
 	gmsgGameMode      = REG_USER_MSG("GameMode", 1);

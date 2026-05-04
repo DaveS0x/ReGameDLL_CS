@@ -35,7 +35,7 @@ void PlayerBlind(CBasePlayer *pPlayer, entvars_t *pevInflictor, entvars_t *pevAt
 	else
 		flAdjustedDamage = fadeTime / 1.75;
 
-	pPlayer->CSPlayer()->RecordDamage(CBasePlayer::Instance(pevAttacker), flAdjustedDamage * 16.0f, flDurationTime);
+	pPlayer->CSPlayer()->RecordDamage(CBasePlayer::Instance(pevAttacker), flAdjustedDamage * 16.0f, flDurationTime, false);
 #endif
 }
 

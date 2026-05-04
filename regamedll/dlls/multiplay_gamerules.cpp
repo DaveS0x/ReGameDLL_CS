@@ -4103,6 +4103,111 @@ void EXT_FUNC CHalfLifeMultiplay::__API_HOOK(PlayerKilled)(CBasePlayer *pVictim,
 	}
 }
 
+namespace
+{
+	struct DeathStatsWireRow
+	{
+		int playerIndex = 0;
+		int damage = 0;
+		int hits = 0;
+	};
+
+	int g_iDeathStatsSeq = 0;
+
+	int ClampDeathStatsInt(float value, int minValue, int maxValue)
+	{
+		int rounded = int(value + 0.5f);
+		if (rounded < minValue)
+			return minValue;
+		if (rounded > maxValue)
+			return maxValue;
+		return rounded;
+	}
+
+	void SortDeathStatsRows(DeathStatsWireRow *rows, int count)
+	{
+		for (int i = 0; i < count; i++)
+		{
+			for (int j = i + 1; j < count; j++)
+			{
+				bool swapRows =
+					rows[j].damage > rows[i].damage ||
+					(rows[j].damage == rows[i].damage && rows[j].hits > rows[i].hits) ||
+					(rows[j].damage == rows[i].damage && rows[j].hits == rows[i].hits && rows[j].playerIndex < rows[i].playerIndex);
+
+				if (!swapRows)
+					continue;
+
+				DeathStatsWireRow tmp = rows[i];
+				rows[i] = rows[j];
+				rows[j] = tmp;
+			}
+		}
+	}
+
+	int CollectDeathStatsRows(CCSPlayer::DamageList_t &list, DeathStatsWireRow *rows, int maxRows)
+	{
+		int count = 0;
+		for (int i = 1; i <= gpGlobals->maxClients && count < maxRows; i++)
+		{
+			const CCSPlayer::CDamageRecord_t &record = list[i - 1];
+			if (record.flStatsDamage <= 0.0f || record.hits <= 0)
+				continue;
+
+			CBasePlayer *pPlayer = UTIL_PlayerByIndex(i);
+			if (!UTIL_IsValidPlayer(pPlayer))
+				continue;
+
+			if (record.userId != pPlayer->CSPlayer()->m_iUserID)
+				continue;
+
+			rows[count].playerIndex = i;
+			rows[count].damage = ClampDeathStatsInt(record.flStatsDamage, 0, 32767);
+			rows[count].hits = ClampDeathStatsInt(float(record.hits), 0, 255);
+			count++;
+		}
+
+		SortDeathStatsRows(rows, count);
+		return count;
+	}
+
+	void SendDeathStats(CBasePlayer *pVictim, CBasePlayer *pKiller, const char *killerWeaponName)
+	{
+		if (!pVictim || FNullEnt(pVictim->edict()) || !gmsgDeathStats)
+			return;
+
+		DeathStatsWireRow attackers[MAX_CLIENTS];
+		DeathStatsWireRow victims[MAX_CLIENTS];
+		int attackerCount = CollectDeathStatsRows(pVictim->CSPlayer()->GetDamageList(), attackers, MAX_CLIENTS);
+		int victimCount = CollectDeathStatsRows(pVictim->CSPlayer()->GetDamageGivenList(), victims, MAX_CLIENTS);
+		const int killerIndex = (pKiller && pKiller->IsPlayer()) ? pKiller->entindex() : 0;
+
+		MESSAGE_BEGIN(MSG_ONE, gmsgDeathStats, nullptr, pVictim->edict());
+			WRITE_BYTE(1); // payload version
+			WRITE_LONG(++g_iDeathStatsSeq);
+			WRITE_BYTE(pVictim->entindex());
+			WRITE_BYTE(killerIndex);
+			WRITE_STRING(killerWeaponName && killerWeaponName[0] ? killerWeaponName : "world");
+
+			WRITE_BYTE(attackerCount);
+			for (int i = 0; i < attackerCount; i++)
+			{
+				WRITE_BYTE(attackers[i].playerIndex);
+				WRITE_SHORT(attackers[i].damage);
+				WRITE_BYTE(attackers[i].hits);
+			}
+
+			WRITE_BYTE(victimCount);
+			for (int i = 0; i < victimCount; i++)
+			{
+				WRITE_BYTE(victims[i].playerIndex);
+				WRITE_SHORT(victims[i].damage);
+				WRITE_BYTE(victims[i].hits);
+			}
+		MESSAGE_END();
+	}
+}
+
 LINK_HOOK_CLASS_VOID_CUSTOM_CHAIN(CHalfLifeMultiplay, CSGameRules, DeathNotice, (CBasePlayer *pVictim, entvars_t *pKiller, entvars_t *pevInflictor), pVictim, pKiller, pevInflictor)
 
 void EXT_FUNC CHalfLifeMultiplay::__API_HOOK(DeathNotice)(CBasePlayer *pVictim, entvars_t *pevKiller, entvars_t *pevInflictor)
@@ -4149,6 +4254,7 @@ void EXT_FUNC CHalfLifeMultiplay::__API_HOOK(DeathNotice)(CBasePlayer *pVictim, 
 		}
 
 		SendDeathMessage(pKiller, pVictim, pAssister, pevInflictor, killer_weapon_name, iDeathMessageFlags, iRarityOfKill);
+		SendDeathStats(pVictim, pKiller, killer_weapon_name);
 
 		// Updates the stats of who has killed whom
 		if (pKiller && pKiller->IsPlayer() && PlayerRelationship(pVictim, pKiller) != GR_TEAMMATE)
