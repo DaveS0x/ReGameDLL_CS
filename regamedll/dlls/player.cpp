@@ -8447,6 +8447,14 @@ CBaseEntity *EXT_FUNC CBasePlayer::__API_HOOK(DropPlayerItem)(const char *pszIte
 			}
 		}
 
+#ifdef REGAMEDLL_ADD
+		if (CSGameRules()->IsFreeForAll() && !FClassnameIs(pWeapon->pev, "weapon_c4"))
+		{
+			pWeapon->DestroyItem();
+			return nullptr;
+		}
+#endif
+
 		const char *modelname = GetCSModelName(pWeapon->m_iId);
 
 		Vector vecOrigin   = pev->origin + gpGlobals->v_forward * 10;

@@ -1112,6 +1112,31 @@ void Host_Say(edict_t *pEntity, BOOL teamonly)
 	}
 }
 
+bool CanBuyWeaponForPlayer(CBasePlayer *pPlayer, int iWeapon)
+{
+#ifdef REGAMEDLL_ADD
+	if (CSGameRules()->IsFreeForAll())
+	{
+		return iWeapon != WEAPON_SHIELDGUN;
+	}
+#endif
+
+	return CanBuyWeaponByMaptype(pPlayer->m_iTeam, (WeaponIdType)iWeapon, CSGameRules()->m_bMapHasVIPSafetyZone == TRUE);
+}
+
+void RemoveWeaponSlotForFfaBuy(CBasePlayer *pPlayer, int slot)
+{
+#ifdef REGAMEDLL_ADD
+	if (!CSGameRules()->IsFreeForAll())
+		return;
+
+	while (pPlayer->m_rgpPlayerItems[slot])
+	{
+		pPlayer->m_rgpPlayerItems[slot]->DestroyItem();
+	}
+#endif
+}
+
 bool CanBuyThis(CBasePlayer *pPlayer, int iWeapon)
 {
 	if (pPlayer->HasShield() && iWeapon == WEAPON_ELITE)
@@ -1143,7 +1168,7 @@ bool CanBuyThis(CBasePlayer *pPlayer, int iWeapon)
 		return false;
 	}
 
-	if (!CanBuyWeaponByMaptype(pPlayer->m_iTeam, (WeaponIdType)iWeapon, CSGameRules()->m_bMapHasVIPSafetyZone == TRUE))
+	if (!CanBuyWeaponForPlayer(pPlayer, iWeapon))
 	{
 		if (g_bClientPrintEnable)
 		{
@@ -1604,11 +1629,21 @@ CBaseEntity *EXT_FUNC __API_HOOK(BuyWeaponByWeaponID)(CBasePlayer *pPlayer, Weap
 
 	if (IsPrimaryWeapon(weaponID))
 	{
-		pPlayer->DropPrimary();
+#ifdef REGAMEDLL_ADD
+		if (CSGameRules()->IsFreeForAll())
+			RemoveWeaponSlotForFfaBuy(pPlayer, PRIMARY_WEAPON_SLOT);
+		else
+#endif
+			pPlayer->DropPrimary();
 	}
 	else
 	{
-		pPlayer->DropSecondary();
+#ifdef REGAMEDLL_ADD
+		if (CSGameRules()->IsFreeForAll())
+			RemoveWeaponSlotForFfaBuy(pPlayer, PISTOL_SLOT);
+		else
+#endif
+			pPlayer->DropSecondary();
 	}
 
 	auto pEntity = pPlayer->GiveNamedItem(info->entityName);
@@ -2448,7 +2483,7 @@ BOOL HandleBuyAliasCommands(CBasePlayer *pPlayer, const char *pszCommand)
 	if (weaponID != WEAPON_NONE)
 	{
 		// assasination maps have a specific set of weapons that can be used in them.
-		if (CanBuyWeaponByMaptype(pPlayer->m_iTeam, weaponID, CSGameRules()->m_bMapHasVIPSafetyZone == TRUE))
+		if (CanBuyWeaponForPlayer(pPlayer, weaponID))
 		{
 			bRetVal = TRUE;
 			BuyWeaponByWeaponID(pPlayer, weaponID);
