@@ -49,6 +49,190 @@ bool IsBotSpeaking()
 	return false;
 }
 
+namespace
+{
+	bool WagerRuntimeEventsEnabled()
+	{
+		return cs16_wager_events.value != 0.0f;
+	}
+
+	void WagerAppend(char *buffer, int bufferSize, int &cursor, const char *text)
+	{
+		if (!text || cursor >= bufferSize - 1)
+			return;
+
+		while (*text && cursor < bufferSize - 1)
+			buffer[cursor++] = *text++;
+
+		buffer[cursor] = '\0';
+	}
+
+	void WagerAppendInt(char *buffer, int bufferSize, int &cursor, int value)
+	{
+		char scratch[32];
+		Q_snprintf(scratch, sizeof(scratch), "%d", value);
+		WagerAppend(buffer, bufferSize, cursor, scratch);
+	}
+
+	void WagerAppendBool(char *buffer, int bufferSize, int &cursor, bool value)
+	{
+		WagerAppend(buffer, bufferSize, cursor, value ? "true" : "false");
+	}
+
+	void WagerAppendJsonString(char *buffer, int bufferSize, int &cursor, const char *value)
+	{
+		static const char hex[] = "0123456789abcdef";
+		WagerAppend(buffer, bufferSize, cursor, "\"");
+
+		if (!value)
+			value = "";
+
+		for (const unsigned char *scan = reinterpret_cast<const unsigned char *>(value); *scan && cursor < bufferSize - 1; scan++)
+		{
+			unsigned char ch = *scan;
+			switch (ch)
+			{
+			case '\\':
+				WagerAppend(buffer, bufferSize, cursor, "\\\\");
+				break;
+			case '"':
+				WagerAppend(buffer, bufferSize, cursor, "\\\"");
+				break;
+			case '\b':
+				WagerAppend(buffer, bufferSize, cursor, "\\b");
+				break;
+			case '\f':
+				WagerAppend(buffer, bufferSize, cursor, "\\f");
+				break;
+			case '\n':
+				WagerAppend(buffer, bufferSize, cursor, "\\n");
+				break;
+			case '\r':
+				WagerAppend(buffer, bufferSize, cursor, "\\r");
+				break;
+			case '\t':
+				WagerAppend(buffer, bufferSize, cursor, "\\t");
+				break;
+			default:
+				if (ch < 0x20)
+				{
+					char escaped[7] = { '\\', 'u', '0', '0', hex[(ch >> 4) & 0x0f], hex[ch & 0x0f], '\0' };
+					WagerAppend(buffer, bufferSize, cursor, escaped);
+				}
+				else if (cursor < bufferSize - 1)
+				{
+					buffer[cursor++] = char(ch);
+					buffer[cursor] = '\0';
+				}
+				break;
+			}
+		}
+
+		WagerAppend(buffer, bufferSize, cursor, "\"");
+	}
+
+	void WagerAppendOptionalJsonStringField(char *buffer, int bufferSize, int &cursor, const char *key, const char *value)
+	{
+		if (!value || !value[0])
+			return;
+
+		WagerAppend(buffer, bufferSize, cursor, ",\"");
+		WagerAppend(buffer, bufferSize, cursor, key);
+		WagerAppend(buffer, bufferSize, cursor, "\":");
+		WagerAppendJsonString(buffer, bufferSize, cursor, value);
+	}
+
+	const char *WagerUserInfoValue(char *infobuffer, const char *key)
+	{
+		const char *value = GET_KEY_VALUE(infobuffer, key);
+		return value ? value : "";
+	}
+
+	void WagerLogPlayerBinding(CBasePlayer *pPlayer, char *infobuffer)
+	{
+		if (!WagerRuntimeEventsEnabled() || !pPlayer || !infobuffer)
+			return;
+
+		const char *joinToken = WagerUserInfoValue(infobuffer, "_csw_join");
+			const char *sessionId = WagerUserInfoValue(infobuffer, "_csw_session");
+			const char *userId = WagerUserInfoValue(infobuffer, "_csw_user");
+			const char *walletAddress = WagerUserInfoValue(infobuffer, "_csw_wallet");
+			if (!joinToken[0])
+				return;
+
+		char payload[2048];
+		int cursor = 0;
+		WagerAppend(payload, sizeof(payload), cursor, "CS16_WAGER_EVENT {\"schemaVersion\":\"cs16-wager-runtime-event.v1\",\"kind\":\"player-binding\",\"slot\":");
+		WagerAppendInt(payload, sizeof(payload), cursor, GETPLAYERUSERID(pPlayer->edict()));
+		WagerAppend(payload, sizeof(payload), cursor, ",\"playerName\":");
+		WagerAppendJsonString(payload, sizeof(payload), cursor, STRING(pPlayer->pev->netname));
+			WagerAppend(payload, sizeof(payload), cursor, ",\"joinToken\":");
+			WagerAppendJsonString(payload, sizeof(payload), cursor, joinToken);
+			WagerAppendOptionalJsonStringField(payload, sizeof(payload), cursor, "sessionId", sessionId);
+			WagerAppendOptionalJsonStringField(payload, sizeof(payload), cursor, "userId", userId);
+			WagerAppendOptionalJsonStringField(payload, sizeof(payload), cursor, "walletAddress", walletAddress);
+			WagerAppend(payload, sizeof(payload), cursor, "}\n");
+		UTIL_LogPrintf("%s", payload);
+	}
+
+	void WagerLogPlayerDisconnect(CBasePlayer *pPlayer)
+	{
+		if (!WagerRuntimeEventsEnabled() || !pPlayer)
+			return;
+
+		int slotUserId = GETPLAYERUSERID(pPlayer->edict());
+		if (slotUserId < 0)
+			return;
+
+		char *infobuffer = GET_INFO_BUFFER(pPlayer->edict());
+		const char *joinToken = infobuffer ? WagerUserInfoValue(infobuffer, "_csw_join") : "";
+		const char *sessionId = infobuffer ? WagerUserInfoValue(infobuffer, "_csw_session") : "";
+		const char *userId = infobuffer ? WagerUserInfoValue(infobuffer, "_csw_user") : "";
+		const char *walletAddress = infobuffer ? WagerUserInfoValue(infobuffer, "_csw_wallet") : "";
+
+		char payload[2048];
+		int cursor = 0;
+		WagerAppend(payload, sizeof(payload), cursor, "CS16_WAGER_EVENT {\"schemaVersion\":\"cs16-wager-runtime-event.v1\",\"kind\":\"disconnect\",\"slot\":");
+		WagerAppendInt(payload, sizeof(payload), cursor, slotUserId);
+		WagerAppend(payload, sizeof(payload), cursor, ",\"playerName\":");
+		WagerAppendJsonString(payload, sizeof(payload), cursor, STRING(pPlayer->pev->netname));
+		WagerAppendOptionalJsonStringField(payload, sizeof(payload), cursor, "joinToken", joinToken);
+		WagerAppendOptionalJsonStringField(payload, sizeof(payload), cursor, "sessionId", sessionId);
+		WagerAppendOptionalJsonStringField(payload, sizeof(payload), cursor, "userId", userId);
+		WagerAppendOptionalJsonStringField(payload, sizeof(payload), cursor, "walletAddress", walletAddress);
+		WagerAppend(payload, sizeof(payload), cursor, "}\n");
+		UTIL_LogPrintf("%s", payload);
+	}
+
+	void WagerLogKill(CBasePlayer *pKiller, CBasePlayer *pVictim, const char *weaponName)
+	{
+		if (!WagerRuntimeEventsEnabled() || !pKiller || !pVictim || pKiller == pVictim)
+			return;
+
+		int killerUserId = GETPLAYERUSERID(pKiller->edict());
+		int victimUserId = GETPLAYERUSERID(pVictim->edict());
+		if (killerUserId < 0 || victimUserId < 0)
+			return;
+
+		char payload[2048];
+		int cursor = 0;
+		WagerAppend(payload, sizeof(payload), cursor, "CS16_WAGER_EVENT {\"schemaVersion\":\"cs16-wager-runtime-event.v1\",\"kind\":\"kill\",\"killerSlot\":");
+		WagerAppendInt(payload, sizeof(payload), cursor, killerUserId);
+		WagerAppend(payload, sizeof(payload), cursor, ",\"victimSlot\":");
+		WagerAppendInt(payload, sizeof(payload), cursor, victimUserId);
+		WagerAppend(payload, sizeof(payload), cursor, ",\"killerName\":");
+		WagerAppendJsonString(payload, sizeof(payload), cursor, STRING(pKiller->pev->netname));
+		WagerAppend(payload, sizeof(payload), cursor, ",\"victimName\":");
+		WagerAppendJsonString(payload, sizeof(payload), cursor, STRING(pVictim->pev->netname));
+		WagerAppend(payload, sizeof(payload), cursor, ",\"weapon\":");
+		WagerAppendJsonString(payload, sizeof(payload), cursor, weaponName && weaponName[0] ? weaponName : "world");
+		WagerAppend(payload, sizeof(payload), cursor, ",\"headshot\":");
+		WagerAppendBool(payload, sizeof(payload), cursor, pVictim->m_bHeadshotKilled);
+		WagerAppend(payload, sizeof(payload), cursor, "}\n");
+		UTIL_LogPrintf("%s", payload);
+	}
+}
+
 
 bool CHalfLifeMultiplay::IsInCareerRound()
 {
@@ -3643,6 +3827,7 @@ void CHalfLifeMultiplay::ClientDisconnected(edict_t *pClient)
 			char *team = GetTeam(pPlayer->m_iTeam);
 
 			FireTargets("game_playerleave", pPlayer, pPlayer, USE_TOGGLE, 0);
+			WagerLogPlayerDisconnect(pPlayer);
 			UTIL_LogPrintf("\"%s<%i><%s><%s>\" disconnected\n", STRING(pPlayer->pev->netname), GETPLAYERUSERID(pPlayer->edict()), GETPLAYERAUTHID(pPlayer->edict()), team);
 
 			// destroy all of the players weapons and items
@@ -4255,6 +4440,7 @@ void EXT_FUNC CHalfLifeMultiplay::__API_HOOK(DeathNotice)(CBasePlayer *pVictim, 
 
 		SendDeathMessage(pKiller, pVictim, pAssister, pevInflictor, killer_weapon_name, iDeathMessageFlags, iRarityOfKill);
 		SendDeathStats(pVictim, pKiller, killer_weapon_name);
+		WagerLogKill(pKiller, pVictim, killer_weapon_name);
 
 		// Updates the stats of who has killed whom
 		if (pKiller && pKiller->IsPlayer() && PlayerRelationship(pVictim, pKiller) != GR_TEAMMATE)
@@ -5203,6 +5389,7 @@ void EXT_FUNC CHalfLifeMultiplay::__API_HOOK(ClientUserInfoChanged)(CBasePlayer 
 {
 	pPlayer->SetPlayerModel(pPlayer->m_bHasC4);
 	pPlayer->SetPrefsFromUserinfo(infobuffer);
+	WagerLogPlayerBinding(pPlayer, infobuffer);
 }
 
 void CHalfLifeMultiplay::ServerActivate()
