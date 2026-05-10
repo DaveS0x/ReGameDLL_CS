@@ -1650,6 +1650,14 @@ CBaseEntity *EXT_FUNC __API_HOOK(BuyWeaponByWeaponID)(CBasePlayer *pPlayer, Weap
 	pPlayer->AddAccount(-info->cost, RT_PLAYER_BOUGHT_SOMETHING);
 
 #ifdef REGAMEDLL_ADD
+	if (pEntity && CSGameRules()->IsFreeForAll())
+	{
+		if (IsPrimaryWeapon(weaponID) && weaponID != WEAPON_SHIELDGUN)
+			pPlayer->m_ffaSelectedPrimary = weaponID;
+		else if (IsSecondaryWeapon(weaponID))
+			pPlayer->m_ffaSelectedSecondary = weaponID;
+	}
+
 	if (refill_bpammo_weapons.value > 1)
 	{
 		CBasePlayerItem *pItem = static_cast<CBasePlayerItem *>(pEntity);
@@ -3716,6 +3724,14 @@ void EXT_FUNC InternalCommand(edict_t *pEntity, const char *pcmd, const char *pa
 				pPlayer->SmartRadio();
 			}
 #ifdef REGAMEDLL_ADD
+			else if (FStrEq(pcmd, "cs_ffa_random_loadout"))
+			{
+				if (CSGameRules()->IsFreeForAll())
+				{
+					pPlayer->m_ffaSelectedPrimary = WEAPON_NONE;
+					pPlayer->m_ffaSelectedSecondary = WEAPON_NONE;
+				}
+			}
 			else if (FStrEq(pcmd, "give"))
 			{
 				if (CVAR_GET_FLOAT("sv_cheats") != 0.0f && CMD_ARGC() > 1 && FStrnEq(parg1, "weapon_", sizeof("weapon_") - 1))

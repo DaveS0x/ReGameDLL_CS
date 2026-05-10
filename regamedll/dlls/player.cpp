@@ -1701,7 +1701,26 @@ void EXT_FUNC CBasePlayer::__API_HOOK(GiveDefaultItems)()
 
 	const int iAmountOfBPAmmo = m_bIsVIP ? 1 : 2; // Give regular the player backpack ammo twice more than to VIP the player
 
+	auto GivePreferredFfaWeapon = [&](WeaponIdType &weaponId, bool primarySlot) -> bool {
+		if (!CSGameRules()->IsFreeForAll() || weaponId == WEAPON_NONE) {
+			return false;
+		}
+
+		WeaponInfoStruct *weaponInfo = GetWeaponInfo(weaponId);
+		const auto iItemID = weaponInfo ? GetItemIdByWeaponId(weaponInfo->id) : ITEM_NONE;
+		const bool matchesSlot = primarySlot ? IsPrimaryWeapon(weaponInfo ? weaponInfo->id : WEAPON_NONE) : IsSecondaryWeapon(weaponInfo ? weaponInfo->id : WEAPON_NONE);
+		if (!weaponInfo || !weaponInfo->entityName || iItemID == ITEM_NONE || !matchesSlot || HasRestrictItem(iItemID, ITEM_TYPE_EQUIPPED))
+		{
+			weaponId = WEAPON_NONE;
+			return false;
+		}
+
+		GiveWeapon(weaponInfo->gunClipSize * iAmountOfBPAmmo, weaponInfo->entityName);
+		return true;
+	};
+
 	// Give default secondary equipment
+	if (!GivePreferredFfaWeapon(m_ffaSelectedSecondary, false))
 	{
 		char *secondaryString = NULL;
 		int secondaryCount = 0;
@@ -1744,14 +1763,16 @@ void EXT_FUNC CBasePlayer::__API_HOOK(GiveDefaultItems)()
 			}
 
 			if (default_weapons_random.value != 0.0f) {
-				WeaponInfoStruct *weaponInfo = secondaryWeaponInfoArray[RANDOM_LONG(0, secondaryCount - 1)];
-				if (weaponInfo)
+				WeaponInfoStruct *weaponInfo = secondaryCount > 0 ? secondaryWeaponInfoArray[RANDOM_LONG(0, secondaryCount - 1)] : nullptr;
+				if (weaponInfo) {
 					GiveWeapon(weaponInfo->gunClipSize * iAmountOfBPAmmo, weaponInfo->entityName);
+				}
 			}
 		}
 	}
 
 	// Give default primary equipment
+	if (!GivePreferredFfaWeapon(m_ffaSelectedPrimary, true))
 	{
 		char *primaryString = NULL;
 		int primaryCount = 0;
@@ -1794,9 +1815,10 @@ void EXT_FUNC CBasePlayer::__API_HOOK(GiveDefaultItems)()
 			}
 
 			if (default_weapons_random.value != 0.0f) {
-				WeaponInfoStruct *weaponInfo = primaryWeaponInfoArray[RANDOM_LONG(0, primaryCount - 1)];
-				if (weaponInfo)
+				WeaponInfoStruct *weaponInfo = primaryCount > 0 ? primaryWeaponInfoArray[RANDOM_LONG(0, primaryCount - 1)] : nullptr;
+				if (weaponInfo) {
 					GiveWeapon(weaponInfo->gunClipSize * iAmountOfBPAmmo, weaponInfo->entityName);
+				}
 			}
 		}
 	}
@@ -6191,6 +6213,11 @@ void CBasePlayer::Reset()
 
 	m_bNotKilled = false;
 
+#ifdef REGAMEDLL_ADD
+	m_ffaSelectedPrimary = WEAPON_NONE;
+	m_ffaSelectedSecondary = WEAPON_NONE;
+#endif
+
 #ifdef REGAMEDLL_FIXES
 	// RemoveShield() included
 	RemoveAllItems(TRUE);
@@ -10562,6 +10589,11 @@ CItemThighPack *SpawnDefuser(const Vector &vecOrigin, edict_t *pentOwner)
 
 void CBasePlayer::Disconnect()
 {
+#ifdef REGAMEDLL_ADD
+	m_ffaSelectedPrimary = WEAPON_NONE;
+	m_ffaSelectedSecondary = WEAPON_NONE;
+#endif
+
 	SetThink(nullptr);
 }
 

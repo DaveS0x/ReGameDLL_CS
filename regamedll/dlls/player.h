@@ -743,6 +743,10 @@ public:
 	TeamName m_iTeam;
 	int m_iAccount;
 	bool m_bHasPrimary;
+#ifdef REGAMEDLL_ADD
+	WeaponIdType m_ffaSelectedPrimary;
+	WeaponIdType m_ffaSelectedSecondary;
+#endif
 	float m_flDeathThrowTime;
 	int m_iThrowDirection;
 	float m_flLastTalk;
