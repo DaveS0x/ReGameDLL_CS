@@ -51,6 +51,13 @@ cvar_t playerid              = { "mp_playerid", "0", FCVAR_SERVER, 0.0f, nullptr
 cvar_t allow_spectators      = { "allow_spectators", "1.0", FCVAR_SERVER, 0.0f, nullptr };
 cvar_t mp_chattime           = { "mp_chattime", "10", FCVAR_SERVER, 0.0f, nullptr };
 cvar_t kick_percent          = { "mp_kickpercent", "0.66", FCVAR_SERVER, 0.0f, nullptr };
+cvar_t votekick_duration     = { "mp_votekick_duration", "30", FCVAR_SERVER, 30.0f, nullptr };
+cvar_t votekick_ban_minutes  = { "mp_votekick_ban_minutes", "15", FCVAR_SERVER, 15.0f, nullptr };
+cvar_t votekick_require_auth = { "mp_votekick_require_auth", "1", FCVAR_SERVER, 1.0f, nullptr };
+cvar_t votekick_min_kills    = { "mp_votekick_min_kills", "5", FCVAR_SERVER, 5.0f, nullptr };
+cvar_t votekick_min_active_seconds = { "mp_votekick_min_active_seconds", "120", FCVAR_SERVER, 120.0f, nullptr };
+cvar_t votekick_start_cooldown = { "mp_votekick_start_cooldown", "45", FCVAR_SERVER, 45.0f, nullptr };
+cvar_t votekick_same_target_cooldown = { "mp_votekick_same_target_cooldown", "45", FCVAR_SERVER, 45.0f, nullptr };
 cvar_t humans_join_team      = { "humans_join_team", "any", FCVAR_SERVER, 0.0f, nullptr };
 cvar_t sk_plr_9mm_bullet1    = { "sk_plr_9mm_bullet1", "0", 0, 0.0f, nullptr };
 cvar_t sk_plr_9mm_bullet2    = { "sk_plr_9mm_bullet2", "0", 0, 0.0f, nullptr };
@@ -250,6 +257,36 @@ void GameDLL_SwapTeams_f()
 	}
 }
 
+void VoteKickAuthBind_f()
+{
+	if (CMD_ARGC() < 3)
+	{
+		CONSOLE_ECHO("Usage: csvoteauthbind <goldsrcUserId> <accountUserId>\n");
+		return;
+	}
+
+	CHalfLifeMultiplay *pRules = CSGameRules();
+	if (!pRules)
+		return;
+
+	pRules->BindVoteKickAccount(Q_atoi(CMD_ARGV(1)), CMD_ARGV(2));
+}
+
+void VoteKickAuthClear_f()
+{
+	if (CMD_ARGC() < 2)
+	{
+		CONSOLE_ECHO("Usage: csvoteauthclear <goldsrcUserId>\n");
+		return;
+	}
+
+	CHalfLifeMultiplay *pRules = CSGameRules();
+	if (!pRules)
+		return;
+
+	pRules->ClearVoteKickAccount(Q_atoi(CMD_ARGV(1)));
+}
+
 #endif // REGAMEDLL_ADD
 
 SpewRetval_t GameDLL_SpewHandler(SpewType_t spewType, int level, const char *pMsg);
@@ -322,6 +359,13 @@ void EXT_FUNC GameDLLInit()
 	CVAR_REGISTER(&allow_spectators);
 	CVAR_REGISTER(&mp_chattime);
 	CVAR_REGISTER(&kick_percent);
+	CVAR_REGISTER(&votekick_duration);
+	CVAR_REGISTER(&votekick_ban_minutes);
+	CVAR_REGISTER(&votekick_require_auth);
+	CVAR_REGISTER(&votekick_min_kills);
+	CVAR_REGISTER(&votekick_min_active_seconds);
+	CVAR_REGISTER(&votekick_start_cooldown);
+	CVAR_REGISTER(&votekick_same_target_cooldown);
 	CVAR_REGISTER(&fragsleft);
 	CVAR_REGISTER(&timeleft);
 	CVAR_REGISTER(&humans_join_team);
@@ -385,6 +429,8 @@ void EXT_FUNC GameDLLInit()
 	ADD_SERVER_COMMAND("game", GameDLL_Version_f);
 	ADD_SERVER_COMMAND("endround", GameDLL_EndRound_f);
 	ADD_SERVER_COMMAND("swapteams", GameDLL_SwapTeams_f);
+	ADD_SERVER_COMMAND("csvoteauthbind", VoteKickAuthBind_f);
+	ADD_SERVER_COMMAND("csvoteauthclear", VoteKickAuthClear_f);
 
 	CVAR_REGISTER(&game_version);
 	CVAR_REGISTER(&maxmoney);

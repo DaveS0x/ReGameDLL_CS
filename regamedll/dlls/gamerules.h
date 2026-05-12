@@ -723,6 +723,80 @@ public:
 	void ResetAllMapVotes();
 	void ProcessMapVote(CBasePlayer *pPlayer, int iVote);
 
+	enum VoteKickChoice
+	{
+		VOTEKICK_CHOICE_NONE = 0,
+		VOTEKICK_CHOICE_YES,
+		VOTEKICK_CHOICE_NO,
+	};
+
+	enum VoteKickGroup
+	{
+		VOTEKICK_GROUP_FFA = 0,
+		VOTEKICK_GROUP_TERRORIST = 1,
+		VOTEKICK_GROUP_CT = 2,
+		VOTEKICK_GROUP_COUNT,
+	};
+
+	enum
+	{
+		VOTEKICK_ACCOUNT_ID_MAX = 64,
+	};
+
+	struct VoteKickSession
+	{
+		bool active;
+		int group;
+		int targetSlot;
+		int targetUserId;
+		int initiatorSlot;
+		float startedAt;
+		float endsAt;
+		float nextStatusAt;
+		int votes[MAX_CLIENTS + 1];
+	};
+
+	struct VoteKickAuthBinding
+	{
+		bool bound;
+		int userId;
+		char accountId[VOTEKICK_ACCOUNT_ID_MAX];
+	};
+
+	struct VoteKickActivityState
+	{
+		int userId;
+		float activeSince;
+	};
+
+	struct VoteKickCooldownState
+	{
+		int userId;
+		char accountId[VOTEKICK_ACCOUNT_ID_MAX];
+		float nextStartAt;
+	};
+
+	struct VoteKickTargetCooldownState
+	{
+		int callerUserId;
+		int targetUserId;
+		char callerAccountId[VOTEKICK_ACCOUNT_ID_MAX];
+		float nextStartAt;
+	};
+
+	void ResetVoteKickSession(VoteKickSession &session);
+	void ResetVoteKickSessions();
+	void ResetVoteKickAntiAbuseState();
+	void ResetVoteKickPlayerState(int slot);
+	void UpdateVoteKickActivity();
+	void BindVoteKickAccount(int userId, const char *accountId);
+	void ClearVoteKickAccount(int userId);
+	bool StartVoteKick(CBasePlayer *pCaller, CBasePlayer *pTarget);
+	bool StartVoteKickByClientSlot(CBasePlayer *pCaller, int clientSlot);
+	bool StartVoteKickByUserId(CBasePlayer *pCaller, int userId);
+	bool CastVoteKick(CBasePlayer *pCaller, bool voteYes);
+	void ThinkVoteKickSessions();
+
 	// BOMB MAP FUNCTIONS
 	VFUNC BOOL IsThereABomber();
 	VFUNC BOOL IsThereABomb();
@@ -817,6 +891,11 @@ public:
 	int m_iUnBalancedRounds;			// keeps track of the # of consecutive rounds that have gone by where one team outnumbers the other team by more than 2
 	int m_iNumEscapeRounds;				// keeps track of the # of consecutive rounds of escape played.. Teams will be swapped after 8 rounds
 	int m_iMapVotes[MAX_VOTE_MAPS];
+	VoteKickSession m_VoteKickSessions[VOTEKICK_GROUP_COUNT];
+	VoteKickAuthBinding m_VoteKickAuthBindings[MAX_CLIENTS + 1];
+	VoteKickActivityState m_VoteKickActivity[MAX_CLIENTS + 1];
+	VoteKickCooldownState m_VoteKickCallerCooldowns[MAX_CLIENTS + 1];
+	VoteKickTargetCooldownState m_VoteKickTargetCooldowns[MAX_CLIENTS + 1][MAX_CLIENTS + 1];
 	int m_iLastPick;
 	int m_iMaxMapTime;
 	int m_iMaxRounds;

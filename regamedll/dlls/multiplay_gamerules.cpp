@@ -175,6 +175,31 @@ namespace
 		UTIL_LogPrintf("%s", payload);
 	}
 
+	void VoteKickLogAuthClaim(CBasePlayer *pPlayer, char *infobuffer)
+	{
+		if (!pPlayer || !infobuffer)
+			return;
+
+		const char *launchToken = WagerUserInfoValue(infobuffer, "_csvote_launch");
+		if (!launchToken[0])
+			return;
+
+		int userId = GETPLAYERUSERID(pPlayer->edict());
+		if (userId < 0)
+			return;
+
+		char payload[2048];
+		int cursor = 0;
+		WagerAppend(payload, sizeof(payload), cursor, "CS16_VOTEKICK_AUTH {\"schemaVersion\":\"cs16-votekick-auth-event.v1\",\"kind\":\"auth-claim\",\"slot\":");
+		WagerAppendInt(payload, sizeof(payload), cursor, userId);
+		WagerAppend(payload, sizeof(payload), cursor, ",\"playerName\":");
+		WagerAppendJsonString(payload, sizeof(payload), cursor, STRING(pPlayer->pev->netname));
+		WagerAppend(payload, sizeof(payload), cursor, ",\"launchToken\":");
+		WagerAppendJsonString(payload, sizeof(payload), cursor, launchToken);
+		WagerAppend(payload, sizeof(payload), cursor, "}\n");
+		UTIL_LogPrintf("%s", payload);
+	}
+
 	void WagerLogPlayerDisconnect(CBasePlayer *pPlayer)
 	{
 		if (!WagerRuntimeEventsEnabled() || !pPlayer)
@@ -618,6 +643,8 @@ CHalfLifeMultiplay::CHalfLifeMultiplay()
 	}
 
 	Q_memset(m_iMapVotes, 0, sizeof(m_iMapVotes));
+	ResetVoteKickSessions();
+	ResetVoteKickAntiAbuseState();
 
 	m_iLastPick = 1;
 	m_bMapHasEscapeZone = false;
@@ -2584,6 +2611,7 @@ void EXT_FUNC CHalfLifeMultiplay::__API_HOOK(Think)()
 {
 	MonitorTutorStatus();
 	m_VoiceGameMgr.Update(gpGlobals->frametime);
+	ThinkVoteKickSessions();
 
 	if (g_psv_clienttrace->value != 1.0f)
 	{
@@ -3828,6 +3856,7 @@ void CHalfLifeMultiplay::ClientDisconnected(edict_t *pClient)
 
 			FireTargets("game_playerleave", pPlayer, pPlayer, USE_TOGGLE, 0);
 			WagerLogPlayerDisconnect(pPlayer);
+			ResetVoteKickPlayerState(ENTINDEX(pClient));
 			UTIL_LogPrintf("\"%s<%i><%s><%s>\" disconnected\n", STRING(pPlayer->pev->netname), GETPLAYERUSERID(pPlayer->edict()), GETPLAYERAUTHID(pPlayer->edict()), team);
 
 			// destroy all of the players weapons and items
@@ -5209,6 +5238,992 @@ void CHalfLifeMultiplay::ProcessMapVote(CBasePlayer *pPlayer, int iVote)
 	}
 }
 
+static bool VoteKickIsHexChar(char c)
+{
+	return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+}
+
+static char VoteKickToLowerHex(char c)
+{
+	if (c >= 'A' && c <= 'F')
+		return c + ('a' - 'A');
+
+	return c;
+}
+
+static int VoteKickClampInt(int value, int minValue, int maxValue)
+{
+	if (value < minValue)
+		return minValue;
+
+	if (value > maxValue)
+		return maxValue;
+
+	return value;
+}
+
+static int VoteKickDurationSeconds()
+{
+	int duration = int(votekick_duration.value);
+	if (duration <= 0)
+		duration = 30;
+
+	return VoteKickClampInt(duration, 5, 120);
+}
+
+static int VoteKickBanMinutes()
+{
+	int minutes = int(votekick_ban_minutes.value);
+	if (minutes < 0)
+		minutes = 0;
+
+	return VoteKickClampInt(minutes, 0, 1440);
+}
+
+static bool VoteKickRequireAuth()
+{
+	return votekick_require_auth.value != 0.0f;
+}
+
+static int VoteKickMinKills()
+{
+	return VoteKickClampInt(int(votekick_min_kills.value), 0, 1000);
+}
+
+static int VoteKickMinActiveSeconds()
+{
+	return VoteKickClampInt(int(votekick_min_active_seconds.value), 0, 3600);
+}
+
+static int VoteKickStartCooldownSeconds()
+{
+	return VoteKickClampInt(int(votekick_start_cooldown.value), 0, 600);
+}
+
+static int VoteKickSameTargetCooldownSeconds()
+{
+	return VoteKickClampInt(int(votekick_same_target_cooldown.value), 0, 600);
+}
+
+static int VoteKickRemainingCooldownSeconds(float nextStartAt)
+{
+	float remaining = nextStartAt - gpGlobals->time;
+	if (remaining <= 0.0f)
+		return 0;
+
+	return int(remaining + 0.999f);
+}
+
+static int VoteKickRemainingSeconds(const CHalfLifeMultiplay::VoteKickSession &session)
+{
+	float remaining = session.endsAt - gpGlobals->time;
+	if (remaining <= 0.0f)
+		return 0;
+
+	return int(remaining + 0.999f);
+}
+
+static bool VoteKickIsValidGroup(int group)
+{
+	return group >= CHalfLifeMultiplay::VOTEKICK_GROUP_FFA && group < CHalfLifeMultiplay::VOTEKICK_GROUP_COUNT;
+}
+
+static bool VoteKickIsConnectedHuman(CBasePlayer *pPlayer)
+{
+	if (!UTIL_IsValidPlayer(pPlayer) || pPlayer->has_disconnected)
+		return false;
+
+	if (pPlayer->IsBot() || (pPlayer->pev->flags & FL_FAKECLIENT))
+		return false;
+
+	return true;
+}
+
+static bool VoteKickIsActiveHuman(CBasePlayer *pPlayer)
+{
+	if (!VoteKickIsConnectedHuman(pPlayer))
+		return false;
+
+	if (pPlayer->m_iTeam == UNASSIGNED || pPlayer->m_iTeam == SPECTATOR)
+		return false;
+
+	return true;
+}
+
+static bool VoteKickIsGroupMember(CHalfLifeMultiplay *pRules, const CHalfLifeMultiplay::VoteKickSession &session, CBasePlayer *pPlayer)
+{
+	if (!VoteKickIsActiveHuman(pPlayer))
+		return false;
+
+	if (session.group == CHalfLifeMultiplay::VOTEKICK_GROUP_FFA)
+		return pRules->IsFreeForAll();
+
+	return !pRules->IsFreeForAll() && pPlayer->m_iTeam == session.group;
+}
+
+static bool VoteKickIsEligibleVoter(CHalfLifeMultiplay *pRules, const CHalfLifeMultiplay::VoteKickSession &session, CBasePlayer *pPlayer)
+{
+	if (!VoteKickIsGroupMember(pRules, session, pPlayer))
+		return false;
+
+	return pPlayer->entindex() != session.targetSlot;
+}
+
+static void VoteKickCount(CHalfLifeMultiplay *pRules, const CHalfLifeMultiplay::VoteKickSession &session, int &groupHumans, int &eligible, int &yes, int &no)
+{
+	groupHumans = 0;
+	eligible = 0;
+	yes = 0;
+	no = 0;
+
+	for (int i = 1; i <= gpGlobals->maxClients; i++)
+	{
+		CBasePlayer *pPlayer = UTIL_PlayerByIndexSafe(i);
+		if (!VoteKickIsGroupMember(pRules, session, pPlayer))
+			continue;
+
+		groupHumans++;
+
+		if (i == session.targetSlot)
+			continue;
+
+		eligible++;
+
+		if (session.votes[i] == CHalfLifeMultiplay::VOTEKICK_CHOICE_YES)
+			yes++;
+		else if (session.votes[i] == CHalfLifeMultiplay::VOTEKICK_CHOICE_NO)
+			no++;
+	}
+}
+
+static void VoteKickSendStatus(CHalfLifeMultiplay *pRules, const CHalfLifeMultiplay::VoteKickSession &session, const char *event, const char *reason)
+{
+	int groupHumans, eligible, yes, no;
+	VoteKickCount(pRules, session, groupHumans, eligible, yes, no);
+
+	int needed = eligible / 2 + 1;
+	char message[192];
+	Q_snprintf(message, sizeof(message),
+		"CSVOTE|%s|group=%d|target=%d|initiator=%d|yes=%d|no=%d|eligible=%d|needed=%d|remaining=%d|reason=%s",
+		event,
+		session.group,
+		session.targetSlot,
+		session.initiatorSlot,
+		yes,
+		no,
+		eligible,
+		needed,
+		VoteKickRemainingSeconds(session),
+		reason ? reason : "");
+
+	for (int i = 1; i <= gpGlobals->maxClients; i++)
+	{
+		CBasePlayer *pPlayer = UTIL_PlayerByIndexSafe(i);
+		if (!VoteKickIsGroupMember(pRules, session, pPlayer))
+			continue;
+
+		ClientPrint(pPlayer->pev, HUD_PRINTTALK, message);
+	}
+}
+
+static int VoteKickPlayerSlot(CBasePlayer *pPlayer)
+{
+	if (!UTIL_IsValidPlayer(pPlayer))
+		return 0;
+
+	return pPlayer->entindex();
+}
+
+static void VoteKickSendClientStatusEx(CBasePlayer *pPlayer, const char *event, int group, int targetSlot, int initiatorSlot, int eligible, int needed, int remaining, const char *reason, int cooldown, int kills, int minKills, int active, int minActive)
+{
+	if (!UTIL_IsValidPlayer(pPlayer) || pPlayer->has_disconnected)
+		return;
+
+	char message[320];
+	Q_snprintf(message, sizeof(message),
+		"CSVOTE|%s|group=%d|target=%d|initiator=%d|yes=0|no=0|eligible=%d|needed=%d|remaining=%d|reason=%s|cooldown=%d|kills=%d|minKills=%d|active=%d|minActive=%d",
+		event,
+		group,
+		targetSlot,
+		initiatorSlot,
+		eligible,
+		needed,
+		remaining,
+		reason ? reason : "",
+		cooldown,
+		kills,
+		minKills,
+		active,
+		minActive);
+
+	ClientPrint(pPlayer->pev, HUD_PRINTTALK, message);
+}
+
+static void VoteKickSendClientStatus(CBasePlayer *pPlayer, const char *event, int group, int targetSlot, int initiatorSlot, int eligible, int needed, int remaining, const char *reason)
+{
+	VoteKickSendClientStatusEx(pPlayer, event, group, targetSlot, initiatorSlot, eligible, needed, remaining, reason, 0, 0, 0, 0, 0);
+}
+
+static void VoteKickSendStartFailure(CBasePlayer *pCaller, int group, int targetSlot, int eligible, const char *reason)
+{
+	const int needed = eligible > 0 ? eligible / 2 + 1 : 0;
+	VoteKickSendClientStatus(pCaller, "FAIL", group, targetSlot, VoteKickPlayerSlot(pCaller), eligible, needed, 0, reason);
+}
+
+static void VoteKickSendStartFailureEx(CBasePlayer *pCaller, int group, int targetSlot, int eligible, const char *reason, int cooldown, int kills, int minKills, int active, int minActive)
+{
+	const int needed = eligible > 0 ? eligible / 2 + 1 : 0;
+	VoteKickSendClientStatusEx(pCaller, "FAIL", group, targetSlot, VoteKickPlayerSlot(pCaller), eligible, needed, 0, reason, cooldown, kills, minKills, active, minActive);
+}
+
+static const char *VoteKickPlayerName(CBasePlayer *pPlayer)
+{
+	return UTIL_IsValidPlayer(pPlayer) ? STRING(pPlayer->pev->netname) : "";
+}
+
+static const char *VoteKickPlayerAuthId(CBasePlayer *pPlayer)
+{
+	if (!UTIL_IsValidPlayer(pPlayer))
+		return "";
+
+	const char *authId = GETPLAYERAUTHID(pPlayer->edict());
+	return authId ? authId : "";
+}
+
+static int VoteKickPlayerUserId(CBasePlayer *pPlayer)
+{
+	return UTIL_IsValidPlayer(pPlayer) ? GETPLAYERUSERID(pPlayer->edict()) : -1;
+}
+
+static int VoteKickPlayerKills(CBasePlayer *pPlayer)
+{
+	if (!UTIL_IsValidPlayer(pPlayer))
+		return 0;
+
+	const int kills = int(pPlayer->pev->frags);
+	return kills > 0 ? kills : 0;
+}
+
+static bool VoteKickAccountIdEquals(const char *left, const char *right)
+{
+	return left && right && !Q_stricmp(left, right);
+}
+
+static bool VoteKickHasPendingAuthClaim(CBasePlayer *pPlayer)
+{
+	if (!UTIL_IsValidPlayer(pPlayer))
+		return false;
+
+	char *infobuffer = GET_INFO_BUFFER(pPlayer->edict());
+	if (!infobuffer)
+		return false;
+
+	const char *launchToken = WagerUserInfoValue(infobuffer, "_csvote_launch");
+	return launchToken[0] != '\0';
+}
+
+static const char *VoteKickTrustedAccountId(CHalfLifeMultiplay *pRules, CBasePlayer *pPlayer)
+{
+	if (!pRules || !UTIL_IsValidPlayer(pPlayer))
+		return "";
+
+	const int slot = pPlayer->entindex();
+	if (slot <= 0 || slot > gpGlobals->maxClients || slot > MAX_CLIENTS)
+		return "";
+
+	const CHalfLifeMultiplay::VoteKickAuthBinding &binding = pRules->m_VoteKickAuthBindings[slot];
+	if (!binding.bound || binding.userId != VoteKickPlayerUserId(pPlayer) || !binding.accountId[0])
+		return "";
+
+	return binding.accountId;
+}
+
+static int VoteKickActiveSeconds(CHalfLifeMultiplay *pRules, CBasePlayer *pPlayer)
+{
+	if (!pRules || !UTIL_IsValidPlayer(pPlayer))
+		return 0;
+
+	const int slot = pPlayer->entindex();
+	if (slot <= 0 || slot > gpGlobals->maxClients || slot > MAX_CLIENTS)
+		return 0;
+
+	const CHalfLifeMultiplay::VoteKickActivityState &activity = pRules->m_VoteKickActivity[slot];
+	if (activity.userId != VoteKickPlayerUserId(pPlayer) || activity.activeSince <= 0.0f)
+		return 0;
+
+	float active = gpGlobals->time - activity.activeSince;
+	return active > 0.0f ? int(active) : 0;
+}
+
+static int VoteKickCallerCooldownRemaining(CHalfLifeMultiplay *pRules, CBasePlayer *pCaller, const char *accountId)
+{
+	if (!pRules || !UTIL_IsValidPlayer(pCaller))
+		return 0;
+
+	const int slot = pCaller->entindex();
+	if (slot <= 0 || slot > gpGlobals->maxClients || slot > MAX_CLIENTS)
+		return 0;
+
+	const CHalfLifeMultiplay::VoteKickCooldownState &cooldown = pRules->m_VoteKickCallerCooldowns[slot];
+	if (cooldown.userId != VoteKickPlayerUserId(pCaller) || !VoteKickAccountIdEquals(cooldown.accountId, accountId))
+		return 0;
+
+	return VoteKickRemainingCooldownSeconds(cooldown.nextStartAt);
+}
+
+static int VoteKickSameTargetCooldownRemaining(CHalfLifeMultiplay *pRules, CBasePlayer *pCaller, CBasePlayer *pTarget, const char *accountId)
+{
+	if (!pRules || !UTIL_IsValidPlayer(pCaller) || !UTIL_IsValidPlayer(pTarget))
+		return 0;
+
+	const int callerSlot = pCaller->entindex();
+	const int targetSlot = pTarget->entindex();
+	if (callerSlot <= 0 || callerSlot > gpGlobals->maxClients || callerSlot > MAX_CLIENTS)
+		return 0;
+	if (targetSlot <= 0 || targetSlot > gpGlobals->maxClients || targetSlot > MAX_CLIENTS)
+		return 0;
+
+	const CHalfLifeMultiplay::VoteKickTargetCooldownState &cooldown = pRules->m_VoteKickTargetCooldowns[callerSlot][targetSlot];
+	if (cooldown.callerUserId != VoteKickPlayerUserId(pCaller) || cooldown.targetUserId != VoteKickPlayerUserId(pTarget))
+		return 0;
+	if (!VoteKickAccountIdEquals(cooldown.callerAccountId, accountId))
+		return 0;
+
+	return VoteKickRemainingCooldownSeconds(cooldown.nextStartAt);
+}
+
+static void VoteKickRecordStartCooldown(CHalfLifeMultiplay *pRules, CBasePlayer *pCaller, CBasePlayer *pTarget, const char *accountId)
+{
+	if (!pRules || !UTIL_IsValidPlayer(pCaller) || !UTIL_IsValidPlayer(pTarget))
+		return;
+
+	const int callerSlot = pCaller->entindex();
+	const int targetSlot = pTarget->entindex();
+	if (callerSlot <= 0 || callerSlot > gpGlobals->maxClients || callerSlot > MAX_CLIENTS)
+		return;
+
+	const int startCooldown = VoteKickStartCooldownSeconds();
+	if (startCooldown > 0)
+	{
+		CHalfLifeMultiplay::VoteKickCooldownState &cooldown = pRules->m_VoteKickCallerCooldowns[callerSlot];
+		Q_memset(&cooldown, 0, sizeof(cooldown));
+		cooldown.userId = VoteKickPlayerUserId(pCaller);
+		Q_strncpy(cooldown.accountId, accountId ? accountId : "", sizeof(cooldown.accountId) - 1);
+		cooldown.accountId[sizeof(cooldown.accountId) - 1] = '\0';
+		cooldown.nextStartAt = gpGlobals->time + startCooldown;
+	}
+
+	if (targetSlot <= 0 || targetSlot > gpGlobals->maxClients || targetSlot > MAX_CLIENTS)
+		return;
+
+	const int sameTargetCooldown = VoteKickSameTargetCooldownSeconds();
+	if (sameTargetCooldown > 0)
+	{
+		CHalfLifeMultiplay::VoteKickTargetCooldownState &cooldown = pRules->m_VoteKickTargetCooldowns[callerSlot][targetSlot];
+		Q_memset(&cooldown, 0, sizeof(cooldown));
+		cooldown.callerUserId = VoteKickPlayerUserId(pCaller);
+		cooldown.targetUserId = VoteKickPlayerUserId(pTarget);
+		Q_strncpy(cooldown.callerAccountId, accountId ? accountId : "", sizeof(cooldown.callerAccountId) - 1);
+		cooldown.callerAccountId[sizeof(cooldown.callerAccountId) - 1] = '\0';
+		cooldown.nextStartAt = gpGlobals->time + sameTargetCooldown;
+	}
+}
+
+static bool VoteKickCopyUuid(CBasePlayer *pTarget, char *uuid, int uuidSize)
+{
+	if (!pTarget || uuidSize < 33)
+		return false;
+
+	const char *authId = GETPLAYERAUTHID(pTarget->edict());
+	if (!authId || !authId[0])
+		return false;
+
+	if (!Q_strnicmp(authId, "ID_", 3))
+		authId += 3;
+
+	if (Q_strlen(authId) != 32)
+		return false;
+
+	for (int i = 0; i < 32; i++)
+	{
+		if (!VoteKickIsHexChar(authId[i]))
+			return false;
+
+		uuid[i] = VoteKickToLowerHex(authId[i]);
+	}
+
+	uuid[32] = '\0';
+	return true;
+}
+
+static bool VoteKickPrepareBanUuid(CBasePlayer *pTarget, char *uuid, int uuidSize)
+{
+	if (VoteKickBanMinutes() <= 0 || !VoteKickCopyUuid(pTarget, uuid, uuidSize))
+		return false;
+
+	for (int i = 1; i <= gpGlobals->maxClients; i++)
+	{
+		CBasePlayer *pPlayer = UTIL_PlayerByIndexSafe(i);
+		if (pPlayer == pTarget || !VoteKickIsConnectedHuman(pPlayer))
+			continue;
+
+		char otherUuid[40];
+		if (VoteKickCopyUuid(pPlayer, otherUuid, sizeof(otherUuid)) && !Q_stricmp(uuid, otherUuid))
+		{
+			UTIL_LogPrintf("Vote kick temporary ban skipped for \"%s<%i><%s><%s>\" because auth ID is shared\n",
+				STRING(pTarget->pev->netname),
+				GETPLAYERUSERID(pTarget->edict()),
+				GETPLAYERAUTHID(pTarget->edict()),
+				GetTeam(pTarget->m_iTeam));
+			SERVER_PRINT(UTIL_VarArgs("[VoteKick] ban skipped shared-auth target_slot=%d target_userid=%d target_name=\"%s\" shared_slot=%d shared_userid=%d shared_name=\"%s\"\n",
+				pTarget->entindex(),
+				GETPLAYERUSERID(pTarget->edict()),
+				STRING(pTarget->pev->netname),
+				pPlayer->entindex(),
+				GETPLAYERUSERID(pPlayer->edict()),
+				STRING(pPlayer->pev->netname)));
+			return false;
+		}
+	}
+
+	return true;
+}
+
+static void VoteKickApplyKickBan(const CHalfLifeMultiplay::VoteKickSession &session, const char *banUuid)
+{
+	CBasePlayer *pTarget = UTIL_PlayerByIndexSafe(session.targetSlot);
+	if (!UTIL_IsValidPlayer(pTarget) || GETPLAYERUSERID(pTarget->edict()) != session.targetUserId)
+	{
+		SERVER_PRINT(UTIL_VarArgs("[VoteKick] apply aborted target_slot=%d expected_userid=%d actual_userid=%d actual_name=\"%s\"\n",
+			session.targetSlot,
+			session.targetUserId,
+			VoteKickPlayerUserId(pTarget),
+			VoteKickPlayerName(pTarget)));
+		return;
+	}
+
+	UTIL_ClientPrintAll(HUD_PRINTCENTER, "#Game_kicked", STRING(pTarget->pev->netname));
+	UTIL_LogPrintf("\"%s<%i><%s><%s>\" triggered \"Vote_Kicked\"\n",
+		STRING(pTarget->pev->netname),
+		GETPLAYERUSERID(pTarget->edict()),
+		GETPLAYERAUTHID(pTarget->edict()),
+		GetTeam(pTarget->m_iTeam));
+
+	const int minutes = VoteKickBanMinutes();
+	SERVER_PRINT(UTIL_VarArgs("[VoteKick] apply target_slot=%d target_userid=%d target_auth=\"%s\" target_name=\"%s\" ban_minutes=%d ban_uuid=\"%s\"\n",
+		session.targetSlot,
+		session.targetUserId,
+		VoteKickPlayerAuthId(pTarget),
+		STRING(pTarget->pev->netname),
+		minutes,
+		(banUuid && banUuid[0]) ? banUuid : ""));
+
+	if (minutes > 0 && banUuid && banUuid[0])
+	{
+		SERVER_COMMAND(UTIL_VarArgs("banid %d %s\n", minutes, banUuid));
+		SERVER_EXECUTE();
+	}
+
+	CLIENT_COMMAND(pTarget->edict(), "disconnect\n");
+}
+
+static void VoteKickFail(CHalfLifeMultiplay *pRules, CHalfLifeMultiplay::VoteKickSession &session, const char *reason)
+{
+	if (!session.active)
+		return;
+
+	SERVER_PRINT(UTIL_VarArgs("[VoteKick] fail reason=%s group=%d target_slot=%d target_userid=%d\n",
+		reason ? reason : "",
+		session.group,
+		session.targetSlot,
+		session.targetUserId));
+	VoteKickSendStatus(pRules, session, "FAIL", reason);
+	pRules->ResetVoteKickSession(session);
+}
+
+static void VoteKickPass(CHalfLifeMultiplay *pRules, CHalfLifeMultiplay::VoteKickSession &session)
+{
+	if (!session.active)
+		return;
+
+	char banUuid[40];
+	banUuid[0] = '\0';
+	CBasePlayer *pTarget = UTIL_PlayerByIndexSafe(session.targetSlot);
+	const bool applyBan = VoteKickPrepareBanUuid(pTarget, banUuid, sizeof(banUuid));
+
+	SERVER_PRINT(UTIL_VarArgs("[VoteKick] pass group=%d target_slot=%d target_userid=%d target_auth=\"%s\" target_name=\"%s\" ban=%d\n",
+		session.group,
+		session.targetSlot,
+		session.targetUserId,
+		VoteKickPlayerAuthId(pTarget),
+		VoteKickPlayerName(pTarget),
+		applyBan ? 1 : 0));
+	VoteKickSendStatus(pRules, session, "PASS", applyBan ? "passed" : "kicked");
+	VoteKickApplyKickBan(session, applyBan ? banUuid : NULL);
+	pRules->ResetVoteKickSession(session);
+}
+
+static void VoteKickEvaluate(CHalfLifeMultiplay *pRules, CHalfLifeMultiplay::VoteKickSession &session, bool allowPeriodicStatus)
+{
+	if (!session.active)
+		return;
+
+	CBasePlayer *pTarget = UTIL_PlayerByIndexSafe(session.targetSlot);
+	if (!VoteKickIsGroupMember(pRules, session, pTarget) || GETPLAYERUSERID(pTarget->edict()) != session.targetUserId)
+	{
+		VoteKickFail(pRules, session, "target_lost");
+		return;
+	}
+
+	int groupHumans, eligible, yes, no;
+	VoteKickCount(pRules, session, groupHumans, eligible, yes, no);
+
+	if (groupHumans < 3)
+	{
+		VoteKickFail(pRules, session, "too_few_players");
+		return;
+	}
+
+	const int needed = eligible / 2 + 1;
+	if (yes >= needed)
+	{
+		VoteKickPass(pRules, session);
+		return;
+	}
+
+	const int undecided = eligible - yes - no;
+	if (yes + undecided < needed)
+	{
+		VoteKickFail(pRules, session, "impossible");
+		return;
+	}
+
+	if (gpGlobals->time >= session.endsAt)
+	{
+		VoteKickFail(pRules, session, "timeout");
+		return;
+	}
+
+	if (allowPeriodicStatus && gpGlobals->time >= session.nextStatusAt)
+	{
+		VoteKickSendStatus(pRules, session, "UPDATE", "");
+		session.nextStatusAt = gpGlobals->time + 5.0f;
+	}
+}
+
+void CHalfLifeMultiplay::ResetVoteKickSession(VoteKickSession &session)
+{
+	Q_memset(&session, 0, sizeof(session));
+}
+
+void CHalfLifeMultiplay::ResetVoteKickSessions()
+{
+	for (int i = 0; i < VOTEKICK_GROUP_COUNT; i++)
+	{
+		ResetVoteKickSession(m_VoteKickSessions[i]);
+	}
+}
+
+void CHalfLifeMultiplay::ResetVoteKickAntiAbuseState()
+{
+	Q_memset(m_VoteKickAuthBindings, 0, sizeof(m_VoteKickAuthBindings));
+	Q_memset(m_VoteKickActivity, 0, sizeof(m_VoteKickActivity));
+	Q_memset(m_VoteKickCallerCooldowns, 0, sizeof(m_VoteKickCallerCooldowns));
+	Q_memset(m_VoteKickTargetCooldowns, 0, sizeof(m_VoteKickTargetCooldowns));
+
+	for (int i = 0; i <= MAX_CLIENTS; i++)
+	{
+		m_VoteKickAuthBindings[i].userId = -1;
+		m_VoteKickActivity[i].userId = -1;
+		m_VoteKickCallerCooldowns[i].userId = -1;
+
+		for (int j = 0; j <= MAX_CLIENTS; j++)
+		{
+			m_VoteKickTargetCooldowns[i][j].callerUserId = -1;
+			m_VoteKickTargetCooldowns[i][j].targetUserId = -1;
+		}
+	}
+}
+
+void CHalfLifeMultiplay::ResetVoteKickPlayerState(int slot)
+{
+	if (slot <= 0 || slot > MAX_CLIENTS)
+		return;
+
+	Q_memset(&m_VoteKickAuthBindings[slot], 0, sizeof(m_VoteKickAuthBindings[slot]));
+	m_VoteKickAuthBindings[slot].userId = -1;
+	Q_memset(&m_VoteKickActivity[slot], 0, sizeof(m_VoteKickActivity[slot]));
+	m_VoteKickActivity[slot].userId = -1;
+	Q_memset(&m_VoteKickCallerCooldowns[slot], 0, sizeof(m_VoteKickCallerCooldowns[slot]));
+	m_VoteKickCallerCooldowns[slot].userId = -1;
+
+	for (int i = 0; i <= MAX_CLIENTS; i++)
+	{
+		Q_memset(&m_VoteKickTargetCooldowns[slot][i], 0, sizeof(m_VoteKickTargetCooldowns[slot][i]));
+		m_VoteKickTargetCooldowns[slot][i].callerUserId = -1;
+		m_VoteKickTargetCooldowns[slot][i].targetUserId = -1;
+	}
+}
+
+void CHalfLifeMultiplay::UpdateVoteKickActivity()
+{
+	for (int i = 1; i <= gpGlobals->maxClients && i <= MAX_CLIENTS; i++)
+	{
+		CBasePlayer *pPlayer = UTIL_PlayerByIndexSafe(i);
+		VoteKickActivityState &activity = m_VoteKickActivity[i];
+
+		if (!VoteKickIsActiveHuman(pPlayer))
+		{
+			activity.userId = -1;
+			activity.activeSince = 0.0f;
+			continue;
+		}
+
+		const int userId = VoteKickPlayerUserId(pPlayer);
+		if (activity.userId != userId || activity.activeSince <= 0.0f)
+		{
+			activity.userId = userId;
+			activity.activeSince = gpGlobals->time;
+		}
+	}
+}
+
+void CHalfLifeMultiplay::BindVoteKickAccount(int userId, const char *accountId)
+{
+	if (userId < 0 || !accountId || !accountId[0])
+		return;
+
+	char cleanAccountId[VOTEKICK_ACCOUNT_ID_MAX];
+	int cursor = 0;
+	for (const char *scan = accountId; *scan && cursor < int(sizeof(cleanAccountId)) - 1; scan++)
+	{
+		const char ch = *scan;
+		if ((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '_' || ch == '-' || ch == '.' || ch == ':')
+			cleanAccountId[cursor++] = ch;
+	}
+	cleanAccountId[cursor] = '\0';
+	if (!cleanAccountId[0])
+		return;
+
+	for (int i = 1; i <= gpGlobals->maxClients && i <= MAX_CLIENTS; i++)
+	{
+		CBasePlayer *pPlayer = UTIL_PlayerByIndexSafe(i);
+		if (!UTIL_IsValidPlayer(pPlayer) || VoteKickPlayerUserId(pPlayer) != userId)
+			continue;
+
+		VoteKickAuthBinding &binding = m_VoteKickAuthBindings[i];
+		Q_memset(&binding, 0, sizeof(binding));
+		binding.bound = true;
+		binding.userId = userId;
+		Q_strncpy(binding.accountId, cleanAccountId, sizeof(binding.accountId) - 1);
+		binding.accountId[sizeof(binding.accountId) - 1] = '\0';
+		SERVER_PRINT(UTIL_VarArgs("[VoteKick] auth bind userid=%d slot=%d account=\"%s\" name=\"%s\"\n",
+			userId,
+			i,
+			binding.accountId,
+			STRING(pPlayer->pev->netname)));
+		return;
+	}
+}
+
+void CHalfLifeMultiplay::ClearVoteKickAccount(int userId)
+{
+	if (userId < 0)
+		return;
+
+	for (int i = 1; i <= MAX_CLIENTS; i++)
+	{
+		if (m_VoteKickAuthBindings[i].userId != userId)
+			continue;
+
+		Q_memset(&m_VoteKickAuthBindings[i], 0, sizeof(m_VoteKickAuthBindings[i]));
+		m_VoteKickAuthBindings[i].userId = -1;
+	}
+}
+
+bool CHalfLifeMultiplay::StartVoteKick(CBasePlayer *pCaller, CBasePlayer *pTarget)
+{
+#ifdef REGAMEDLL_ADD
+	static const int flagKick = UTIL_ReadFlags("k");
+	if ((flagKick & UTIL_ReadFlags(vote_flags.string)) == 0)
+	{
+		VoteKickSendStartFailure(pCaller, VOTEKICK_GROUP_FFA, VoteKickPlayerSlot(pTarget), 0, "disabled");
+
+		if (pCaller)
+			ClientPrint(pCaller->pev, HUD_PRINTCENTER, "#Command_Not_Available");
+
+		return false;
+	}
+#endif
+
+	if (!VoteKickIsActiveHuman(pCaller))
+	{
+		if (pCaller)
+		{
+			VoteKickSendStartFailure(pCaller, VOTEKICK_GROUP_FFA, VoteKickPlayerSlot(pTarget), 0, "caller_invalid");
+			ClientPrint(pCaller->pev, HUD_PRINTCONSOLE, "Vote kick is only available to active human players.");
+		}
+
+		return false;
+	}
+
+	if (!VoteKickIsActiveHuman(pTarget))
+	{
+		VoteKickSendStartFailure(pCaller, VOTEKICK_GROUP_FFA, VoteKickPlayerSlot(pTarget), 0, "target_invalid");
+		ClientPrint(pCaller->pev, HUD_PRINTCONSOLE, "Vote kick target must be an active human player.");
+		return false;
+	}
+
+	if (pCaller == pTarget)
+	{
+		VoteKickSendStartFailure(pCaller, VOTEKICK_GROUP_FFA, VoteKickPlayerSlot(pTarget), 0, "self");
+		ClientPrint(pCaller->pev, HUD_PRINTCONSOLE, "#Game_vote_not_yourself");
+		return false;
+	}
+
+	int group = VOTEKICK_GROUP_FFA;
+	if (!IsFreeForAll())
+	{
+		if (pTarget->m_iTeam != TERRORIST && pTarget->m_iTeam != CT)
+		{
+			VoteKickSendStartFailure(pCaller, VOTEKICK_GROUP_FFA, VoteKickPlayerSlot(pTarget), 0, "inactive_team");
+			ClientPrint(pCaller->pev, HUD_PRINTCONSOLE, "Vote kick target must be on an active team.");
+			return false;
+		}
+
+		if (pCaller->m_iTeam != pTarget->m_iTeam)
+		{
+			VoteKickSendStartFailure(pCaller, pTarget->m_iTeam, VoteKickPlayerSlot(pTarget), 0, "enemy_team");
+			ClientPrint(pCaller->pev, HUD_PRINTCONSOLE, "#Game_vote_players_on_your_team");
+			return false;
+		}
+
+		group = pTarget->m_iTeam;
+	}
+
+	if (!VoteKickIsValidGroup(group))
+	{
+		VoteKickSendStartFailure(pCaller, VOTEKICK_GROUP_FFA, VoteKickPlayerSlot(pTarget), 0, "inactive_group");
+		ClientPrint(pCaller->pev, HUD_PRINTCONSOLE, "Vote kick is not available for this team.");
+		return false;
+	}
+
+	VoteKickSession &session = m_VoteKickSessions[group];
+	const int targetSlot = pTarget->entindex();
+	const int targetUserId = GETPLAYERUSERID(pTarget->edict());
+
+	if (session.active)
+	{
+		if (session.targetSlot == targetSlot && session.targetUserId == targetUserId)
+			return CastVoteKick(pCaller, true);
+
+		VoteKickSendStartFailure(pCaller, group, targetSlot, 0, "active_vote");
+		ClientPrint(pCaller->pev, HUD_PRINTCONSOLE, "A vote kick is already in progress for your vote group.");
+		return false;
+	}
+
+	VoteKickSession candidate;
+	ResetVoteKickSession(candidate);
+	candidate.group = group;
+	candidate.targetSlot = targetSlot;
+	candidate.targetUserId = targetUserId;
+
+	int groupHumans, eligible, yes, no;
+	VoteKickCount(this, candidate, groupHumans, eligible, yes, no);
+	if (groupHumans < 3)
+	{
+		VoteKickSendStartFailure(pCaller, group, targetSlot, eligible, "too_few_players");
+		ClientPrint(pCaller->pev, HUD_PRINTCONSOLE, "#Cannot_Vote_With_Less_Than_Three");
+		return false;
+	}
+
+	UpdateVoteKickActivity();
+
+	const char *accountId = VoteKickTrustedAccountId(this, pCaller);
+	const int callerKills = VoteKickPlayerKills(pCaller);
+	const int minKills = VoteKickMinKills();
+	const int callerActive = VoteKickActiveSeconds(this, pCaller);
+	const int minActive = VoteKickMinActiveSeconds();
+
+	if (VoteKickRequireAuth() && !accountId[0])
+	{
+		const char *reason = VoteKickHasPendingAuthClaim(pCaller) ? "auth_pending" : "auth_required";
+		VoteKickSendStartFailureEx(pCaller, group, targetSlot, eligible, reason, 0, callerKills, minKills, callerActive, minActive);
+		ClientPrint(pCaller->pev, HUD_PRINTCONSOLE, "Vote kick requires a signed-in account.");
+		return false;
+	}
+
+	if (callerKills < minKills || callerActive < minActive)
+	{
+		VoteKickSendStartFailureEx(pCaller, group, targetSlot, eligible, "insufficient_activity", 0, callerKills, minKills, callerActive, minActive);
+		ClientPrint(pCaller->pev, HUD_PRINTCONSOLE, "Vote kick requires more match activity.");
+		return false;
+	}
+
+	int cooldown = VoteKickSameTargetCooldownRemaining(this, pCaller, pTarget, accountId);
+	if (cooldown > 0)
+	{
+		VoteKickSendStartFailureEx(pCaller, group, targetSlot, eligible, "same_target_cooldown", cooldown, callerKills, minKills, callerActive, minActive);
+		ClientPrint(pCaller->pev, HUD_PRINTCONSOLE, "Please wait before starting another vote kick for that player.");
+		return false;
+	}
+
+	cooldown = VoteKickCallerCooldownRemaining(this, pCaller, accountId);
+	if (cooldown > 0)
+	{
+		VoteKickSendStartFailureEx(pCaller, group, targetSlot, eligible, "cooldown", cooldown, callerKills, minKills, callerActive, minActive);
+		ClientPrint(pCaller->pev, HUD_PRINTCONSOLE, "Please wait before starting another vote kick.");
+		return false;
+	}
+
+	ResetVoteKickSession(session);
+	session.active = true;
+	session.group = group;
+	session.targetSlot = targetSlot;
+	session.targetUserId = targetUserId;
+	session.initiatorSlot = pCaller->entindex();
+	session.startedAt = gpGlobals->time;
+	session.endsAt = gpGlobals->time + VoteKickDurationSeconds();
+	session.nextStatusAt = gpGlobals->time + 5.0f;
+	session.votes[pCaller->entindex()] = VOTEKICK_CHOICE_YES;
+	VoteKickRecordStartCooldown(this, pCaller, pTarget, accountId);
+
+	SERVER_PRINT(UTIL_VarArgs("[VoteKick] start group=%d caller_slot=%d caller_userid=%d caller_auth=\"%s\" caller_name=\"%s\" target_slot=%d target_userid=%d target_auth=\"%s\" target_name=\"%s\" eligible=%d needed=%d\n",
+		group,
+		pCaller->entindex(),
+		GETPLAYERUSERID(pCaller->edict()),
+		VoteKickPlayerAuthId(pCaller),
+		STRING(pCaller->pev->netname),
+		targetSlot,
+		targetUserId,
+		VoteKickPlayerAuthId(pTarget),
+		STRING(pTarget->pev->netname),
+		eligible,
+		eligible / 2 + 1));
+	ClientPrint(pCaller->pev, HUD_PRINTCONSOLE, "#Game_vote_cast", UTIL_dtos1(targetUserId));
+	VoteKickSendStatus(this, session, "START", "");
+	VoteKickEvaluate(this, session, false);
+	return true;
+}
+
+bool CHalfLifeMultiplay::StartVoteKickByClientSlot(CBasePlayer *pCaller, int clientSlot)
+{
+	if (clientSlot <= 0 || clientSlot > gpGlobals->maxClients)
+	{
+		if (pCaller)
+		{
+			VoteKickSendStartFailure(pCaller, VOTEKICK_GROUP_FFA, 0, 0, "target_not_found");
+			ClientPrint(pCaller->pev, HUD_PRINTCONSOLE, "Usage: csvotekick <clientSlot>");
+		}
+
+		return false;
+	}
+
+	CBasePlayer *pTarget = UTIL_PlayerByIndexSafe(clientSlot);
+	if (!UTIL_IsValidPlayer(pTarget))
+	{
+		if (pCaller)
+		{
+			VoteKickSendStartFailure(pCaller, VOTEKICK_GROUP_FFA, clientSlot, 0, "target_not_found");
+			ClientPrint(pCaller->pev, HUD_PRINTCONSOLE, "Vote kick player not found.");
+		}
+
+		return false;
+	}
+
+	return StartVoteKick(pCaller, pTarget);
+}
+
+bool CHalfLifeMultiplay::StartVoteKickByUserId(CBasePlayer *pCaller, int userId)
+{
+	for (int i = 1; i <= gpGlobals->maxClients; i++)
+	{
+		CBasePlayer *pTarget = UTIL_PlayerByIndexSafe(i);
+		if (!UTIL_IsValidPlayer(pTarget))
+			continue;
+
+		if (GETPLAYERUSERID(pTarget->edict()) == userId)
+			return StartVoteKick(pCaller, pTarget);
+	}
+
+	if (pCaller)
+	{
+		VoteKickSendStartFailure(pCaller, VOTEKICK_GROUP_FFA, 0, 0, "target_not_found");
+		ClientPrint(pCaller->pev, HUD_PRINTCONSOLE, "#Game_vote_player_not_found", UTIL_dtos1(userId));
+	}
+
+	return false;
+}
+
+bool CHalfLifeMultiplay::CastVoteKick(CBasePlayer *pCaller, bool voteYes)
+{
+	if (!VoteKickIsActiveHuman(pCaller))
+		return false;
+
+	VoteKickSession *pSession = nullptr;
+	VoteKickSession *pVisibleSession = nullptr;
+	for (int i = 0; i < VOTEKICK_GROUP_COUNT; i++)
+	{
+		if (!m_VoteKickSessions[i].active)
+			continue;
+
+		if (VoteKickIsGroupMember(this, m_VoteKickSessions[i], pCaller))
+			pVisibleSession = &m_VoteKickSessions[i];
+
+		if (VoteKickIsEligibleVoter(this, m_VoteKickSessions[i], pCaller))
+		{
+			pSession = &m_VoteKickSessions[i];
+			break;
+		}
+	}
+
+	if (!pSession)
+	{
+		if (pVisibleSession)
+			VoteKickSendStartFailure(pCaller, pVisibleSession->group, pVisibleSession->targetSlot, 0, "not_eligible");
+		else
+			VoteKickSendStartFailure(pCaller, VOTEKICK_GROUP_FFA, 0, 0, "no_active_vote");
+
+		ClientPrint(pCaller->pev, HUD_PRINTCONSOLE, "You are not eligible to vote in an active vote kick.");
+		return false;
+	}
+
+	const int slot = pCaller->entindex();
+	const bool effectiveVoteYes = voteYes || slot == pSession->initiatorSlot;
+	const int choice = effectiveVoteYes ? VOTEKICK_CHOICE_YES : VOTEKICK_CHOICE_NO;
+	if (pSession->votes[slot] == choice)
+		return true;
+
+	pSession->votes[slot] = choice;
+	int groupHumans, eligible, yes, no;
+	VoteKickCount(this, *pSession, groupHumans, eligible, yes, no);
+	SERVER_PRINT(UTIL_VarArgs("[VoteKick] vote choice=%s voter_slot=%d voter_userid=%d voter_auth=\"%s\" voter_name=\"%s\" target_slot=%d target_userid=%d yes=%d no=%d eligible=%d needed=%d\n",
+		effectiveVoteYes ? "yes" : "no",
+		slot,
+		GETPLAYERUSERID(pCaller->edict()),
+		VoteKickPlayerAuthId(pCaller),
+		STRING(pCaller->pev->netname),
+		pSession->targetSlot,
+		pSession->targetUserId,
+		yes,
+		no,
+		eligible,
+		eligible / 2 + 1));
+	VoteKickSendStatus(this, *pSession, "UPDATE", "");
+	VoteKickEvaluate(this, *pSession, false);
+	return true;
+}
+
+void CHalfLifeMultiplay::ThinkVoteKickSessions()
+{
+	UpdateVoteKickActivity();
+
+	for (int i = 0; i < VOTEKICK_GROUP_COUNT; i++)
+	{
+		VoteKickEvaluate(this, m_VoteKickSessions[i], true);
+	}
+}
+
 LINK_HOOK_CLASS_VOID_CUSTOM_CHAIN2(CHalfLifeMultiplay, CSGameRules, ChangeLevel)
 
 // Server is changing to a new level, check mapcycle.txt for map name and setup info
@@ -5390,6 +6405,7 @@ void EXT_FUNC CHalfLifeMultiplay::__API_HOOK(ClientUserInfoChanged)(CBasePlayer 
 	pPlayer->SetPlayerModel(pPlayer->m_bHasC4);
 	pPlayer->SetPrefsFromUserinfo(infobuffer);
 	WagerLogPlayerBinding(pPlayer, infobuffer);
+	VoteKickLogAuthClaim(pPlayer, infobuffer);
 }
 
 void CHalfLifeMultiplay::ServerActivate()

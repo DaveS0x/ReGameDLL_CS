@@ -533,82 +533,8 @@ int CountTeamPlayers(int iTeam)
 
 void ProcessKickVote(CBasePlayer *pVotingPlayer, CBasePlayer *pKickPlayer)
 {
-	CBaseEntity *pTempEntity;
-	CBasePlayer *pTempPlayer;
-	int iValidVotes;
-	int iVoteID;
-	int iVotesNeeded;
-	float fKickPercent;
-
-	if (!pVotingPlayer || !pKickPlayer)
-		return;
-
-	int iTeamCount = CountTeamPlayers(pVotingPlayer->m_iTeam);
-
-	if (iTeamCount < 3)
-		return;
-
-	iValidVotes = 0;
-	pTempEntity = nullptr;
-	iVoteID = pVotingPlayer->m_iCurrentKickVote;
-
-	while ((pTempEntity = UTIL_FindEntityByClassname(pTempEntity, "player")))
-	{
-		if (FNullEnt(pTempEntity->edict()))
-			break;
-
-		if (pTempEntity->IsDormant())
-			continue;
-
-		pTempPlayer = GetClassPtr<CCSPlayer>((CBasePlayer *)pTempEntity->pev);
-
-		if (!pTempPlayer || pTempPlayer->m_iTeam == UNASSIGNED)
-			continue;
-
-		if (pTempPlayer->m_iTeam == pVotingPlayer->m_iTeam && pTempPlayer->m_iCurrentKickVote == iVoteID)
-			iValidVotes++;
-	}
-
-	if (kick_percent.value < 0)
-		CVAR_SET_STRING("mp_kickpercent", "0.0");
-
-	else if (kick_percent.value > 1)
-		CVAR_SET_STRING("mp_kickpercent", "1.0");
-
-	iVotesNeeded = iValidVotes;
-	fKickPercent = (iTeamCount * kick_percent.value + 0.5);
-
-	if (iVotesNeeded >= int(fKickPercent))
-	{
-#ifdef REGAMEDLL_FIXES
-		SERVER_COMMAND(UTIL_VarArgs("kick #%d \"You have been voted off.\"\n", iVoteID));
-		SERVER_EXECUTE();
-#endif
-
-		UTIL_ClientPrintAll(HUD_PRINTCENTER, "#Game_kicked", STRING(pKickPlayer->pev->netname));
-
-#ifndef REGAMEDLL_FIXES
-		SERVER_COMMAND(UTIL_VarArgs("kick #%d\n", iVoteID));
-#endif
-		pTempEntity = nullptr;
-
-		while ((pTempEntity = UTIL_FindEntityByClassname(pTempEntity, "player")))
-		{
-			if (FNullEnt(pTempEntity->edict()))
-				break;
-
-			if (pTempEntity->IsDormant())
-				continue;
-
-			pTempPlayer = GetClassPtr<CCSPlayer>((CBasePlayer *)pTempEntity->pev);
-
-			if (!pTempPlayer || pTempPlayer->m_iTeam == UNASSIGNED)
-				continue;
-
-			if (pTempPlayer->m_iTeam == pVotingPlayer->m_iTeam && pTempPlayer->m_iCurrentKickVote == iVoteID)
-				pTempPlayer->m_iCurrentKickVote = 0;
-		}
-	}
+	if (CSGameRules())
+		CSGameRules()->StartVoteKick(pVotingPlayer, pKickPlayer);
 }
 
 void CheckStartMoney()
@@ -2697,6 +2623,55 @@ void EXT_FUNC InternalCommand(edict_t *pEntity, const char *pcmd, const char *pa
 			pPlayer->ForceClientDllUpdate();
 		}
 	}
+	else if (FStrEq(pcmd, "csvotekick"))
+	{
+		if (gpGlobals->time >= pPlayer->m_flLastCommandTime[CMD_VOTE])
+		{
+			pPlayer->m_flLastCommandTime[CMD_VOTE] = gpGlobals->time + 0.3f;
+
+			if (gpGlobals->time < pPlayer->m_flNextVoteTime)
+			{
+				ClientPrint(pPlayer->pev, HUD_PRINTCONSOLE, "#Wait_3_Seconds");
+				return;
+			}
+
+			pPlayer->m_flNextVoteTime = gpGlobals->time + 3;
+
+			if (CMD_ARGC_() != 2 || Q_strlen(parg1) <= 0)
+			{
+				ClientPrint(pPlayer->pev, HUD_PRINTCONSOLE, "Usage: csvotekick <clientSlot>");
+				return;
+			}
+
+			CSGameRules()->StartVoteKickByClientSlot(pPlayer, Q_atoi(parg1));
+		}
+	}
+	else if (FStrEq(pcmd, "csvote"))
+	{
+		if (gpGlobals->time >= pPlayer->m_flLastCommandTime[CMD_VOTE])
+		{
+			pPlayer->m_flLastCommandTime[CMD_VOTE] = gpGlobals->time + 0.2f;
+
+			if (CMD_ARGC_() != 2 || Q_strlen(parg1) <= 0)
+			{
+				ClientPrint(pPlayer->pev, HUD_PRINTCONSOLE, "Usage: csvote yes|no");
+				return;
+			}
+
+			if (FStrEq(parg1, "yes") || FStrEq(parg1, "1"))
+			{
+				CSGameRules()->CastVoteKick(pPlayer, true);
+			}
+			else if (FStrEq(parg1, "no") || FStrEq(parg1, "0"))
+			{
+				CSGameRules()->CastVoteKick(pPlayer, false);
+			}
+			else
+			{
+				ClientPrint(pPlayer->pev, HUD_PRINTCONSOLE, "Usage: csvote yes|no");
+			}
+		}
+	}
 	else if (FStrEq(pcmd, "vote"))
 	{
 		if (gpGlobals->time >= pPlayer->m_flLastCommandTime[CMD_VOTE])
@@ -2744,38 +2719,7 @@ void EXT_FUNC InternalCommand(edict_t *pEntity, const char *pcmd, const char *pa
 					return;
 				}
 
-				if (CountTeamPlayers(pPlayer->m_iTeam) < 3)
-				{
-					ClientPrint(pPlayer->pev, HUD_PRINTCONSOLE, "#Cannot_Vote_With_Less_Than_Three");
-					return;
-				}
-
-				CBaseEntity *pKickEntity = EntityFromUserID(iVoteID);
-				if (pKickEntity)
-				{
-					CBasePlayer *pKickPlayer = GetClassPtr<CCSPlayer>((CBasePlayer *)pKickEntity->pev);
-
-					if (pKickPlayer->m_iTeam != pPlayer->m_iTeam)
-					{
-						ClientPrint(pPlayer->pev, HUD_PRINTCONSOLE, "#Game_vote_players_on_your_team");
-						return;
-					}
-
-					if (pKickPlayer == pPlayer)
-					{
-						ClientPrint(pPlayer->pev, HUD_PRINTCONSOLE, "#Game_vote_not_yourself");
-						return;
-					}
-
-					ClientPrint(pPlayer->pev, HUD_PRINTCONSOLE, "#Game_vote_cast", UTIL_dtos1(iVoteID));
-					pPlayer->m_iCurrentKickVote = iVoteID;
-					ProcessKickVote(pPlayer, pKickPlayer);
-				}
-				else
-				{
-					ListPlayers(pPlayer);
-					ClientPrint(pPlayer->pev, HUD_PRINTCONSOLE, "#Game_vote_player_not_found", UTIL_dtos1(iVoteID));
-				}
+				CSGameRules()->StartVoteKickByUserId(pPlayer, iVoteID);
 			}
 		}
 	}
