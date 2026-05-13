@@ -1864,97 +1864,85 @@ BOOL EXT_FUNC __API_HOOK(HandleMenu_ChooseTeam)(CBasePlayer *pPlayer, int slot)
 			return TRUE;
 		}
 
-		// Only spectate if we are in the freeze period or dead.
-		// This is done here just in case.
-		if (g_pGameRules->IsFreezePeriod() || pPlayer->pev->deadflag != DEAD_NO)
+		if (pPlayer->m_iTeam != UNASSIGNED && pPlayer->pev->deadflag == DEAD_NO)
 		{
-			if (pPlayer->m_iTeam != UNASSIGNED && pPlayer->pev->deadflag == DEAD_NO)
+			if (pPlayer->Kill())
 			{
-				if (pPlayer->Kill())
-				{
-					// add 1 to frags to balance out the 1 subtracted for killing yourself
-					pPlayer->pev->frags++;
-				}
+				// add 1 to frags to balance out the 1 subtracted for killing yourself
+				pPlayer->pev->frags++;
 			}
+		}
 
-			pPlayer->RemoveAllItems(TRUE);
+		pPlayer->RemoveAllItems(TRUE);
 
 #ifndef REGAMEDLL_FIXES
-			// NOTE: It is already does reset inside RemoveAllItems
-			pPlayer->m_bHasC4 = false;
+		// NOTE: It is already does reset inside RemoveAllItems
+		pPlayer->m_bHasC4 = false;
 #endif
 
 #ifdef REGAMEDLL_FIXES
-			if (pPlayer->m_iTeam != SPECTATOR)
+		if (pPlayer->m_iTeam != SPECTATOR)
 #endif
-			{
-				// notify other clients of player joined to team spectator
-				UTIL_LogPrintf("\"%s<%i><%s><%s>\" joined team \"SPECTATOR\"\n", STRING(pPlayer->pev->netname),
-					GETPLAYERUSERID(pPlayer->edict()), GETPLAYERAUTHID(pPlayer->edict()), GetTeam(pPlayer->m_iTeam));
-			}
-
-			pPlayer->m_iTeam = SPECTATOR;
-			pPlayer->m_iJoiningState = JOINED;
-
-			// Reset money
-#ifdef REGAMEDLL_ADD
-			pPlayer->AddAccount(0, RT_PLAYER_SPEC_JOIN, false);
-#else
-			pPlayer->m_iAccount = 0;
-
-			MESSAGE_BEGIN(MSG_ONE, gmsgMoney, nullptr, pPlayer->pev);
-				WRITE_LONG(pPlayer->m_iAccount);
-				WRITE_BYTE(0);
-			MESSAGE_END();
-#endif
-
-#ifndef REGAMEDLL_FIXES
-			MESSAGE_BEGIN(MSG_BROADCAST, gmsgScoreInfo);
-#else
-			MESSAGE_BEGIN(MSG_ALL, gmsgScoreInfo);
-#endif
-				WRITE_BYTE(ENTINDEX(pPlayer->edict()));
-				WRITE_SHORT(int(pPlayer->pev->frags));
-				WRITE_SHORT(pPlayer->m_iDeaths);
-				WRITE_SHORT(0);
-				WRITE_SHORT(0);
-			MESSAGE_END();
-
-			pPlayer->m_pIntroCamera = nullptr;
-			pPlayer->m_bTeamChanged = true;
-
-			if (TheBots)
-			{
-				TheBots->OnEvent(EVENT_PLAYER_CHANGED_TEAM, pPlayer);
-			}
-
-			pPlayer->TeamChangeUpdate();
-
-			edict_t *pentSpawnSpot = g_pGameRules->GetPlayerSpawnSpot(pPlayer);
-			pPlayer->StartObserver(pentSpawnSpot->v.origin, pentSpawnSpot->v.angles);
-
-#ifndef REGAMEDLL_FIXES
-			// TODO: it was already sent in StartObserver
-			MESSAGE_BEGIN(MSG_ALL, gmsgSpectator);
-				WRITE_BYTE(ENTINDEX(pPlayer->edict()));
-				WRITE_BYTE(1);
-			MESSAGE_END();
-#endif
-			// do we have fadetoblack on? (need to fade their screen back in)
-			if (fadetoblack.value == FADETOBLACK_STAY)
-			{
-				UTIL_ScreenFade(pPlayer, Vector(0, 0, 0), 0.001, 0, 0, FFADE_IN);
-			}
-
-			return TRUE;
-		}
-		else
 		{
-			ClientPrint(pPlayer->pev, HUD_PRINTCENTER, "#Cannot_Be_Spectator");
-			CLIENT_COMMAND(ENT(pPlayer->pev), "slot10\n");
-
-			return FALSE;
+			// notify other clients of player joined to team spectator
+			UTIL_LogPrintf("\"%s<%i><%s><%s>\" joined team \"SPECTATOR\"\n", STRING(pPlayer->pev->netname),
+				GETPLAYERUSERID(pPlayer->edict()), GETPLAYERAUTHID(pPlayer->edict()), GetTeam(pPlayer->m_iTeam));
 		}
+
+		pPlayer->m_iTeam = SPECTATOR;
+		pPlayer->m_iJoiningState = JOINED;
+
+		// Reset money
+#ifdef REGAMEDLL_ADD
+		pPlayer->AddAccount(0, RT_PLAYER_SPEC_JOIN, false);
+#else
+		pPlayer->m_iAccount = 0;
+
+		MESSAGE_BEGIN(MSG_ONE, gmsgMoney, nullptr, pPlayer->pev);
+			WRITE_LONG(pPlayer->m_iAccount);
+			WRITE_BYTE(0);
+		MESSAGE_END();
+#endif
+
+#ifndef REGAMEDLL_FIXES
+		MESSAGE_BEGIN(MSG_BROADCAST, gmsgScoreInfo);
+#else
+		MESSAGE_BEGIN(MSG_ALL, gmsgScoreInfo);
+#endif
+			WRITE_BYTE(ENTINDEX(pPlayer->edict()));
+			WRITE_SHORT(int(pPlayer->pev->frags));
+			WRITE_SHORT(pPlayer->m_iDeaths);
+			WRITE_SHORT(0);
+			WRITE_SHORT(0);
+		MESSAGE_END();
+
+		pPlayer->m_pIntroCamera = nullptr;
+		pPlayer->m_bTeamChanged = true;
+
+		if (TheBots)
+		{
+			TheBots->OnEvent(EVENT_PLAYER_CHANGED_TEAM, pPlayer);
+		}
+
+		pPlayer->TeamChangeUpdate();
+
+		edict_t *pentSpawnSpot = g_pGameRules->GetPlayerSpawnSpot(pPlayer);
+		pPlayer->StartObserver(pentSpawnSpot->v.origin, pentSpawnSpot->v.angles);
+
+#ifndef REGAMEDLL_FIXES
+		// TODO: it was already sent in StartObserver
+		MESSAGE_BEGIN(MSG_ALL, gmsgSpectator);
+			WRITE_BYTE(ENTINDEX(pPlayer->edict()));
+			WRITE_BYTE(1);
+		MESSAGE_END();
+#endif
+		// do we have fadetoblack on? (need to fade their screen back in)
+		if (fadetoblack.value == FADETOBLACK_STAY)
+		{
+			UTIL_ScreenFade(pPlayer, Vector(0, 0, 0), 0.001, 0, 0, FFADE_IN);
+		}
+
+		return TRUE;
 
 		break;
 	}

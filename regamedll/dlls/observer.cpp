@@ -478,8 +478,10 @@ void EXT_FUNC CBasePlayer::__API_HOOK(Observer_SetMode)(int iMode)
 	// verify observer target again
 	if (m_hObserverTarget)
 	{
+		bool bForceSameTeam = (forcecamera != CAMERA_MODE_SPEC_ANYONE && m_iTeam != SPECTATOR);
+
 #ifdef REGAMEDLL_FIXES
-		m_hObserverTarget = Observer_IsValidTarget( ENTINDEX(m_hObserverTarget->edict()), forcecamera != CAMERA_MODE_SPEC_ANYONE );
+		m_hObserverTarget = Observer_IsValidTarget( ENTINDEX(m_hObserverTarget->edict()), bForceSameTeam );
 #else
 		CBasePlayer *pTarget = m_hObserverTarget;
 
@@ -488,7 +490,7 @@ void EXT_FUNC CBasePlayer::__API_HOOK(Observer_SetMode)(int iMode)
 			|| pTarget->has_disconnected
 			|| pTarget->GetObserverMode() != OBS_NONE
 			|| (pTarget->pev->effects & EF_NODRAW)
-			|| (forcecamera != CAMERA_MODE_SPEC_ANYONE && pTarget->m_iTeam != m_iTeam))
+			|| (bForceSameTeam && pTarget->m_iTeam != m_iTeam))
 			m_hObserverTarget = nullptr;
 #endif
 	}

@@ -7590,7 +7590,7 @@ void EXT_FUNC CBasePlayer::__API_HOOK(UpdateClientData)()
 				FireTargets("game_playerjoin", this, this, USE_TOGGLE, 0);
 			}
 
-			m_iObserverLastMode = OBS_ROAMING;
+			m_iObserverLastMode = OBS_IN_EYE;
 			m_iObserverC4State = 0;
 			m_bObserverHasDefuser = false;
 			SetObserverAutoDirector(false);
