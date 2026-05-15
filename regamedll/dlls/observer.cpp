@@ -200,6 +200,8 @@ void CBasePlayer::__API_HOOK(Observer_FindNextPlayer)(bool bReverse, const char 
 			WRITE_BYTE(ENTINDEX(m_hObserverTarget->edict()));
 		MESSAGE_END();
 
+		SendSpecArmor2(this, m_hObserverTarget);
+
 		// Store the target in pev so the physics DLL can get to it
 		if (pev->iuser1 != OBS_ROAMING)
 			pev->iuser2 = ENTINDEX(m_hObserverTarget->edict());

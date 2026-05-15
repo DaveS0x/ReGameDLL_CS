@@ -400,6 +400,8 @@ BOOL CItemKevlar::MyTouch(CBasePlayer *pPlayer)
 #endif
 	MESSAGE_END();
 
+	SendSpecArmor2ToObservers(pPlayer);
+
 	if (TheTutor)
 	{
 		TheTutor->OnEvent(EVENT_PLAYER_BOUGHT_SOMETHING, pPlayer);
@@ -448,6 +450,8 @@ BOOL CItemAssaultSuit::MyTouch(CBasePlayer *pPlayer)
 	MESSAGE_BEGIN(MSG_ONE, gmsgArmorType, nullptr, pPlayer->pev);
 		WRITE_BYTE(1); // 0 = ARMOR_KEVLAR, 1 = ARMOR_VESTHELM
 	MESSAGE_END();
+
+	SendSpecArmor2ToObservers(pPlayer);
 
 	if (TheTutor)
 	{

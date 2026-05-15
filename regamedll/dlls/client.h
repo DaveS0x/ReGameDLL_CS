@@ -287,6 +287,7 @@ extern int gmsgBuyClose;
 extern int gmsgItemStatus;
 extern int gmsgLocation;
 extern int gmsgSpecHealth2;
+extern int gmsgSpecArmor2;
 extern int gmsgBarTime2;
 extern int gmsgBotProgress;
 extern int gmsgBrass;
@@ -297,3 +298,5 @@ extern int gmsgHealthInfo;
 
 class CBasePlayer;
 void SendAssistInfo(CBasePlayer *pPlayer, edict_t *pRecipient = nullptr);
+void SendSpecArmor2(CBasePlayer *pObserver, CBasePlayer *pTarget);
+void SendSpecArmor2ToObservers(CBasePlayer *pTarget);

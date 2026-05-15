@@ -7718,6 +7718,8 @@ void EXT_FUNC CBasePlayer::__API_HOOK(UpdateClientData)()
 		MESSAGE_BEGIN(MSG_ONE, gmsgBattery, nullptr, pev);
 			WRITE_SHORT(int(pev->armorvalue));
 		MESSAGE_END();
+
+		SendSpecArmor2ToObservers(this);
 	}
 
 	if (pev->dmg_take != 0.0f || pev->dmg_save != 0.0f || m_bitsHUDDamage != m_bitsDamageType)

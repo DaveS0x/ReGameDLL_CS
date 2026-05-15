@@ -78,6 +78,7 @@ int gmsgBuyClose = 0;
 int gmsgItemStatus = 0;
 int gmsgLocation = 0;
 int gmsgSpecHealth2 = 0;
+int gmsgSpecArmor2 = 0;
 int gmsgBarTime2 = 0;
 int gmsgBotProgress = 0;
 int gmsgBrass = 0;
@@ -221,6 +222,7 @@ void LinkUserMessages()
 	gmsgBotVoice      = REG_USER_MSG("BotVoice", 2);
 	gmsgBuyClose      = REG_USER_MSG("BuyClose", 0);
 	gmsgSpecHealth2   = REG_USER_MSG("SpecHealth2", 2);
+	gmsgSpecArmor2    = REG_USER_MSG("SpecArmor2", 3);
 	gmsgBarTime2      = REG_USER_MSG("BarTime2", 4);
 	gmsgItemStatus    = REG_USER_MSG("ItemStatus", 1);
 	gmsgLocation      = REG_USER_MSG("Location", -1);
@@ -234,6 +236,37 @@ void LinkUserMessages()
 	gmsgAccount       = REG_USER_MSG("Account", 5);
 	gmsgHealthInfo    = REG_USER_MSG("HealthInfo", 5);
 #endif
+}
+
+void SendSpecArmor2(CBasePlayer *pObserver, CBasePlayer *pTarget)
+{
+	if (!UTIL_IsValidPlayer(pObserver) || !UTIL_IsValidPlayer(pTarget))
+		return;
+
+	MESSAGE_BEGIN(MSG_ONE, gmsgSpecArmor2, nullptr, pObserver->edict());
+		WRITE_BYTE(pTarget->entindex());
+		WRITE_BYTE(clamp(int(pTarget->pev->armorvalue), 0, 255));
+		WRITE_BYTE(pTarget->m_iKevlar == ARMOR_VESTHELM ? 1 : 0);
+	MESSAGE_END();
+}
+
+void SendSpecArmor2ToObservers(CBasePlayer *pTarget)
+{
+	if (!UTIL_IsValidPlayer(pTarget))
+		return;
+
+	for (int i = 1; i <= gpGlobals->maxClients; i++)
+	{
+		CBasePlayer *pObserver = UTIL_PlayerByIndex(i);
+
+		if (!UTIL_IsValidPlayer(pObserver))
+			continue;
+
+		if (!pObserver->IsObservingPlayer(pTarget))
+			continue;
+
+		SendSpecArmor2(pObserver, pTarget);
+	}
 }
 
 void WriteSigonMessages()
