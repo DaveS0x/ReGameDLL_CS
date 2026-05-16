@@ -202,6 +202,9 @@ cvar_t stamina_restore_rate    = { "mp_stamina_restore_rate", "0", 0, 0.f, nullp
 
 cvar_t logkills                = { "mp_logkills", "1", FCVAR_SERVER, 0.0f, nullptr };
 cvar_t cs16_wager_events       = { "cs16_wager_events", "0", FCVAR_SERVER, 0.0f, nullptr };
+cvar_t cs16_ranked_events      = { "cs16_ranked_events", "0", FCVAR_SERVER, 0.0f, nullptr };
+cvar_t cs16_ranked_debug       = { "cs16_ranked_debug", "0", FCVAR_SERVER, 0.0f, nullptr };
+cvar_t cs16_ranked_feedback    = { "cs16_ranked_feedback", "0", FCVAR_SERVER, 0.0f, nullptr };
 cvar_t randomspawn             = { "mp_randomspawn", "0", FCVAR_SERVER, 0.0f, nullptr };
 
 cvar_t playerid_showhealth     = { "mp_playerid_showhealth", "1", 0, 1.0f, nullptr };
@@ -285,6 +288,58 @@ void VoteKickAuthClear_f()
 		return;
 
 	pRules->ClearVoteKickAccount(Q_atoi(CMD_ARGV(1)));
+}
+
+void RankedPrivateMessage_f()
+{
+	if (CMD_ARGC() < 3)
+	{
+		CONSOLE_ECHO("Usage: csrankmsg <goldsrcUserId> <message>\n");
+		return;
+	}
+
+	if (cs16_ranked_feedback.value == 0.0f)
+		return;
+
+	const int userId = Q_atoi(CMD_ARGV(1));
+	const char *message = CMD_ARGV(2);
+	if (userId < 0 || !message || !message[0])
+		return;
+
+	for (int i = 1; i <= gpGlobals->maxClients && i <= MAX_CLIENTS; i++)
+	{
+		CBasePlayer *pPlayer = UTIL_PlayerByIndexSafe(i);
+		if (!UTIL_IsValidPlayer(pPlayer) || GETPLAYERUSERID(pPlayer->edict()) != userId)
+			continue;
+
+		ClientPrint(pPlayer->pev, HUD_PRINTTALK, message);
+		return;
+	}
+}
+
+void RankedBroadcastMessage_f()
+{
+	if (CMD_ARGC() < 2)
+	{
+		CONSOLE_ECHO("Usage: csrankbroadcast <message>\n");
+		return;
+	}
+
+	if (cs16_ranked_feedback.value == 0.0f)
+		return;
+
+	const char *message = CMD_ARGV(1);
+	if (!message || !message[0])
+		return;
+
+	for (int i = 1; i <= gpGlobals->maxClients && i <= MAX_CLIENTS; i++)
+	{
+		CBasePlayer *pPlayer = UTIL_PlayerByIndexSafe(i);
+		if (!UTIL_IsValidPlayer(pPlayer) || pPlayer->has_disconnected)
+			continue;
+
+		ClientPrint(pPlayer->pev, HUD_PRINTTALK, message);
+	}
 }
 
 #endif // REGAMEDLL_ADD
@@ -431,6 +486,8 @@ void EXT_FUNC GameDLLInit()
 	ADD_SERVER_COMMAND("swapteams", GameDLL_SwapTeams_f);
 	ADD_SERVER_COMMAND("csvoteauthbind", VoteKickAuthBind_f);
 	ADD_SERVER_COMMAND("csvoteauthclear", VoteKickAuthClear_f);
+	ADD_SERVER_COMMAND("csrankmsg", RankedPrivateMessage_f);
+	ADD_SERVER_COMMAND("csrankbroadcast", RankedBroadcastMessage_f);
 
 	CVAR_REGISTER(&game_version);
 	CVAR_REGISTER(&maxmoney);
@@ -527,6 +584,9 @@ void EXT_FUNC GameDLLInit()
 	CVAR_REGISTER(&cv_hostage_ai_enable);
 	CVAR_REGISTER(&logkills);
 	CVAR_REGISTER(&cs16_wager_events);
+	CVAR_REGISTER(&cs16_ranked_events);
+	CVAR_REGISTER(&cs16_ranked_debug);
+	CVAR_REGISTER(&cs16_ranked_feedback);
 
 	CVAR_REGISTER(&playerid_showhealth);
 	CVAR_REGISTER(&playerid_field);

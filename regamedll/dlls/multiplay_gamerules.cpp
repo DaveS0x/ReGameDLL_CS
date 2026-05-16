@@ -49,11 +49,23 @@ bool IsBotSpeaking()
 	return false;
 }
 
+static const char *VoteKickTrustedAccountId(CHalfLifeMultiplay *pRules, CBasePlayer *pPlayer);
+
 namespace
 {
 	bool WagerRuntimeEventsEnabled()
 	{
 		return cs16_wager_events.value != 0.0f;
+	}
+
+	bool RankedRuntimeEventsEnabled()
+	{
+		return cs16_ranked_events.value != 0.0f;
+	}
+
+	bool RankedRuntimeDebugEnabled()
+	{
+		return cs16_ranked_debug.value != 0.0f;
 	}
 
 	void WagerAppend(char *buffer, int bufferSize, int &cursor, const char *text)
@@ -253,6 +265,138 @@ namespace
 		WagerAppendJsonString(payload, sizeof(payload), cursor, weaponName && weaponName[0] ? weaponName : "world");
 		WagerAppend(payload, sizeof(payload), cursor, ",\"headshot\":");
 		WagerAppendBool(payload, sizeof(payload), cursor, pVictim->m_bHeadshotKilled);
+		WagerAppend(payload, sizeof(payload), cursor, "}\n");
+		UTIL_LogPrintf("%s", payload);
+	}
+
+	void RankedAppendPlayerDebugFields(char *payload, int bufferSize, int &cursor, const char *prefix, CBasePlayer *pPlayer)
+	{
+		if (!pPlayer)
+			return;
+
+		int slot = GETPLAYERUSERID(pPlayer->edict());
+		WagerAppend(payload, bufferSize, cursor, ",\"");
+		WagerAppend(payload, bufferSize, cursor, prefix);
+		WagerAppend(payload, bufferSize, cursor, "Slot\":");
+		WagerAppendInt(payload, bufferSize, cursor, slot);
+		WagerAppend(payload, bufferSize, cursor, ",\"");
+		WagerAppend(payload, bufferSize, cursor, prefix);
+		WagerAppend(payload, bufferSize, cursor, "Name\":");
+		WagerAppendJsonString(payload, bufferSize, cursor, STRING(pPlayer->pev->netname));
+		WagerAppend(payload, bufferSize, cursor, ",\"");
+		WagerAppend(payload, bufferSize, cursor, prefix);
+		WagerAppend(payload, bufferSize, cursor, "Bot\":");
+		WagerAppendBool(payload, bufferSize, cursor, pPlayer->IsBot());
+	}
+
+	void RankedLogSkip(const char *reason, CBasePlayer *pKiller, CBasePlayer *pVictim, const char *weaponName)
+	{
+		if (!RankedRuntimeDebugEnabled())
+			return;
+
+		char payload[2048];
+		int cursor = 0;
+		WagerAppend(payload, sizeof(payload), cursor, "CS16_RANKED_SKIP {\"schemaVersion\":\"cs16-ranked-runtime-skip.v1\",\"reason\":");
+		WagerAppendJsonString(payload, sizeof(payload), cursor, reason ? reason : "unknown");
+		RankedAppendPlayerDebugFields(payload, sizeof(payload), cursor, "killer", pKiller);
+		RankedAppendPlayerDebugFields(payload, sizeof(payload), cursor, "victim", pVictim);
+		WagerAppend(payload, sizeof(payload), cursor, ",\"weapon\":");
+		WagerAppendJsonString(payload, sizeof(payload), cursor, weaponName && weaponName[0] ? weaponName : "world");
+		WagerAppend(payload, sizeof(payload), cursor, ",\"map\":");
+		WagerAppendJsonString(payload, sizeof(payload), cursor, STRING(gpGlobals->mapname));
+		WagerAppend(payload, sizeof(payload), cursor, "}\n");
+		UTIL_LogPrintf("%s", payload);
+	}
+
+	void RankedLogKill(CHalfLifeMultiplay *pRules, CBasePlayer *pKiller, CBasePlayer *pVictim, CBasePlayer *pAssister, const char *weaponName, int roundNumber)
+	{
+		if (!RankedRuntimeEventsEnabled())
+		{
+			RankedLogSkip("events-disabled", pKiller, pVictim, weaponName);
+			return;
+		}
+
+		if (!pRules)
+		{
+			RankedLogSkip("missing-rules", pKiller, pVictim, weaponName);
+			return;
+		}
+
+		if (pKiller && pVictim && pKiller == pVictim)
+		{
+			RankedLogSkip("self-kill", pKiller, pVictim, weaponName);
+			return;
+		}
+
+		if (!pKiller || !pVictim || !pKiller->IsPlayer() || !pVictim->IsPlayer())
+		{
+			RankedLogSkip("non-player", pKiller, pVictim, weaponName);
+			return;
+		}
+
+		if (pKiller->IsBot() || pVictim->IsBot())
+		{
+			RankedLogSkip("bot-participant", pKiller, pVictim, weaponName);
+			return;
+		}
+
+		if (!pRules->IsFreeForAll() && pRules->PlayerRelationship(pKiller, pVictim) == GR_TEAMMATE)
+		{
+			RankedLogSkip("same-team-non-ffa", pKiller, pVictim, weaponName);
+			return;
+		}
+
+		const char *killerAccountId = VoteKickTrustedAccountId(pRules, pKiller);
+		const char *victimAccountId = VoteKickTrustedAccountId(pRules, pVictim);
+		if (!killerAccountId[0] || !victimAccountId[0])
+		{
+			RankedLogSkip("missing-trusted-binding", pKiller, pVictim, weaponName);
+			return;
+		}
+
+		const char *assisterAccountId = "";
+		if (pAssister && pAssister != pKiller && pAssister != pVictim && pAssister->IsPlayer() && !pAssister->IsBot())
+			assisterAccountId = VoteKickTrustedAccountId(pRules, pAssister);
+
+		int killerUserId = GETPLAYERUSERID(pKiller->edict());
+		int victimUserId = GETPLAYERUSERID(pVictim->edict());
+		if (killerUserId < 0 || victimUserId < 0)
+		{
+			RankedLogSkip("invalid-slot", pKiller, pVictim, weaponName);
+			return;
+		}
+
+		char payload[2048];
+		int cursor = 0;
+		WagerAppend(payload, sizeof(payload), cursor, "CS16_RANKED_EVENT {\"schemaVersion\":\"cs16-ranked-runtime-event.v1\",\"kind\":\"kill\",\"killerSlot\":");
+		WagerAppendInt(payload, sizeof(payload), cursor, killerUserId);
+		WagerAppend(payload, sizeof(payload), cursor, ",\"victimSlot\":");
+		WagerAppendInt(payload, sizeof(payload), cursor, victimUserId);
+		WagerAppend(payload, sizeof(payload), cursor, ",\"killerUserId\":");
+		WagerAppendJsonString(payload, sizeof(payload), cursor, killerAccountId);
+		WagerAppend(payload, sizeof(payload), cursor, ",\"victimUserId\":");
+		WagerAppendJsonString(payload, sizeof(payload), cursor, victimAccountId);
+		WagerAppend(payload, sizeof(payload), cursor, ",\"killerName\":");
+		WagerAppendJsonString(payload, sizeof(payload), cursor, STRING(pKiller->pev->netname));
+		WagerAppend(payload, sizeof(payload), cursor, ",\"victimName\":");
+		WagerAppendJsonString(payload, sizeof(payload), cursor, STRING(pVictim->pev->netname));
+		WagerAppend(payload, sizeof(payload), cursor, ",\"weapon\":");
+		WagerAppendJsonString(payload, sizeof(payload), cursor, weaponName && weaponName[0] ? weaponName : "world");
+		WagerAppend(payload, sizeof(payload), cursor, ",\"headshot\":");
+		WagerAppendBool(payload, sizeof(payload), cursor, pVictim->m_bHeadshotKilled);
+		WagerAppend(payload, sizeof(payload), cursor, ",\"map\":");
+		WagerAppendJsonString(payload, sizeof(payload), cursor, STRING(gpGlobals->mapname));
+		WagerAppend(payload, sizeof(payload), cursor, ",\"roundNumber\":");
+		WagerAppendInt(payload, sizeof(payload), cursor, roundNumber);
+		if (assisterAccountId[0])
+		{
+			WagerAppend(payload, sizeof(payload), cursor, ",\"assisterUserId\":");
+			WagerAppendJsonString(payload, sizeof(payload), cursor, assisterAccountId);
+			WagerAppend(payload, sizeof(payload), cursor, ",\"assisterSlot\":");
+			WagerAppendInt(payload, sizeof(payload), cursor, GETPLAYERUSERID(pAssister->edict()));
+			WagerAppend(payload, sizeof(payload), cursor, ",\"assisterName\":");
+			WagerAppendJsonString(payload, sizeof(payload), cursor, STRING(pAssister->pev->netname));
+		}
 		WagerAppend(payload, sizeof(payload), cursor, "}\n");
 		UTIL_LogPrintf("%s", payload);
 	}
@@ -4470,6 +4614,7 @@ void EXT_FUNC CHalfLifeMultiplay::__API_HOOK(DeathNotice)(CBasePlayer *pVictim, 
 		SendDeathMessage(pKiller, pVictim, pAssister, pevInflictor, killer_weapon_name, iDeathMessageFlags, iRarityOfKill);
 		SendDeathStats(pVictim, pKiller, killer_weapon_name);
 		WagerLogKill(pKiller, pVictim, killer_weapon_name);
+		RankedLogKill(this, pKiller, pVictim, pAssister, killer_weapon_name, m_iTotalRoundsPlayed);
 
 		// Updates the stats of who has killed whom
 		if (pKiller && pKiller->IsPlayer() && PlayerRelationship(pVictim, pKiller) != GR_TEAMMATE)
