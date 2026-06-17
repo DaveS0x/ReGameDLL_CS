@@ -655,4 +655,31 @@ void CCSPlayer::RecordDamage(CBasePlayer *pAttacker, float flDamage, float flFla
 	givenRecord.flStatsDamage += flDamage;
 	givenRecord.userId    = victimUserId;
 	givenRecord.hits++;
+
+	// Real-time hit feedback: unicast an authoritative per-hit marker to the
+	// attacking *human* client only. Mirrors the Death Stats pattern but fires
+	// live, per hit. GoldSrc never tells the attacker its own outgoing damage
+	// natively, so the JS HUD's floating damage numbers + crosshair hitmarker
+	// depend entirely on this message. pev->health is still pre-decrement here
+	// (TakeDamage subtracts after RecordDamage), and flDamage is the post-armor
+	// HP damage actually dealt.
+	CBasePlayer *pVictimPlayer = BasePlayer();
+	if (gmsgHitMarker
+		&& pAttacker->entindex() != pVictimPlayer->entindex()
+		&& !(pAttacker->pev->flags & FL_FAKECLIENT))
+	{
+		const int remainingHealth = Q_max(0, int(pVictimPlayer->pev->health - flDamage));
+		int hitFlags = 0;
+		if (remainingHealth <= 0)
+			hitFlags |= (1 << 0); // killing blow
+
+		MESSAGE_BEGIN(MSG_ONE, gmsgHitMarker, nullptr, pAttacker->edict());
+			WRITE_BYTE(1);                                                        // payload version
+			WRITE_BYTE(pVictimPlayer->entindex());                               // victim index
+			WRITE_SHORT(Q_min(int(flDamage), 32767));                            // HP damage this hit
+			WRITE_BYTE(pVictimPlayer->m_LastHitGroup == HITGROUP_HEAD ? 1 : 0);  // headshot
+			WRITE_SHORT(remainingHealth);                                        // victim remaining HP
+			WRITE_BYTE(hitFlags);                                                // flags (bit0 = killing blow)
+		MESSAGE_END();
+	}
 }
