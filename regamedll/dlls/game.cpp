@@ -123,6 +123,7 @@ cvar_t roundrespawn_time     = { "mp_roundrespawn_time", "20", 0, 20.0f, nullptr
 cvar_t auto_reload_weapons   = { "mp_auto_reload_weapons", "0", 0, 0.0f, nullptr };
 cvar_t refill_bpammo_weapons = { "mp_refill_bpammo_weapons", "0", 0, 0.0f, nullptr }; // Useful for mods like DeathMatch, GunGame, ZombieMod etc
 cvar_t freeforall            = { "mp_freeforall", "0", FCVAR_SERVER, 0.0f, nullptr };
+cvar_t ffa_bonus_interval    = { "mp_ffa_bonus_interval", "30", FCVAR_SERVER, 30.0f, nullptr }; // CounterSol: FFA bonus-weapon rotation period (seconds)
 cvar_t auto_join_team        = { "mp_auto_join_team", "0", 0, 0.0f, nullptr };
 cvar_t max_teamkills         = { "mp_max_teamkills", "3", 0, 3.0f, nullptr };
 cvar_t fraglimit             = { "mp_fraglimit", "0", FCVAR_SERVER, 0.0f, nullptr };
@@ -500,6 +501,7 @@ void EXT_FUNC GameDLLInit()
 	CVAR_REGISTER(&auto_reload_weapons);
 	CVAR_REGISTER(&refill_bpammo_weapons);
 	CVAR_REGISTER(&freeforall);
+	CVAR_REGISTER(&ffa_bonus_interval);
 	CVAR_REGISTER(&auto_join_team);
 	CVAR_REGISTER(&max_teamkills);
 	CVAR_REGISTER(&fraglimit);

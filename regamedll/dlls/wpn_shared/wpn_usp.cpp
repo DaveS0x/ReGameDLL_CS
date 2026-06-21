@@ -10,6 +10,10 @@ void CUSP::Spawn()
 	SET_MODEL(ENT(pev), "models/w_usp.mdl");
 
 	m_iWeaponState &= ~WPNSTATE_SHIELD_DRAWN;
+
+	// CounterSol: start with the silencer attached by default (still toggleable via secondary attack)
+	m_iWeaponState |= WPNSTATE_USP_SILENCED;
+
 	m_iDefaultAmmo = USP_DEFAULT_GIVE;
 	m_flAccuracy = 0.92f;
 

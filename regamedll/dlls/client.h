@@ -232,6 +232,7 @@ extern int gmsgAmmoX;
 extern int gmsgDeathMsg;
 extern int gmsgScoreAttrib;
 extern int gmsgScoreInfo;
+extern int gmsgFfaBonus;
 extern int gmsgAssistInfo;
 extern int gmsgDeathStats;
 extern int gmsgHitMarker;

@@ -14,6 +14,9 @@ void CM4A1::Spawn()
 	m_iShotsFired = 0;
 	m_bDelayFire = true;
 
+	// CounterSol: start with the silencer attached by default (still toggleable via secondary attack)
+	m_iWeaponState |= WPNSTATE_M4A1_SILENCED;
+
 #ifdef REGAMEDLL_API
 	CSPlayerWeapon()->m_flBaseDamage = M4A1_DAMAGE;
 	m_flBaseDamageSil = M4A1_DAMAGE_SIL;

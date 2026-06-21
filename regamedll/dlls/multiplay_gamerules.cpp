@@ -739,6 +739,11 @@ CHalfLifeMultiplay::CHalfLifeMultiplay()
 	m_iNumTerrorist = 0;
 	m_iNumSpawnableCT = 0;
 	m_iNumSpawnableTerrorist = 0;
+
+	// CounterSol: FFA rotating bonus weapon (rotateAt == 0 forces a pick on the first FFA think)
+	m_iFfaBonusWeapon = WEAPON_NONE;
+	m_flFfaBonusRotateAt = 0;
+	m_iFfaBonusWindow = 0;
 	m_bMapHasCameras = -1;
 
 	m_iLoserBonus = m_rgRewardAccountRules[RR_LOSER_BONUS_DEFAULT];
@@ -2749,6 +2754,59 @@ void CHalfLifeMultiplay::PickNextVIP()
 	}
 }
 
+// CounterSol: curated FFA bonus-weapon pool (variety + the otherwise-unbuyable auto-snipers)
+static const int s_ffaBonusPool[] =
+{
+	WEAPON_AWP, WEAPON_G3SG1, WEAPON_SG550, WEAPON_M249, WEAPON_P90,
+	WEAPON_AUG, WEAPON_SG552, WEAPON_XM1014, WEAPON_DEAGLE, WEAPON_SCOUT
+};
+
+int CHalfLifeMultiplay::GetFfaBonusSecondsLeft() const
+{
+	int secs = (int)ceil(m_flFfaBonusRotateAt - gpGlobals->time);
+	return secs < 0 ? 0 : secs;
+}
+
+void CHalfLifeMultiplay::SendFfaBonus(CBasePlayer *pPlayer)
+{
+	if (m_iFfaBonusWeapon == WEAPON_NONE)
+		return;
+
+	MESSAGE_BEGIN(pPlayer ? MSG_ONE : MSG_ALL, gmsgFfaBonus, nullptr, pPlayer ? pPlayer->edict() : nullptr);
+		WRITE_BYTE(m_iFfaBonusWeapon);
+		WRITE_SHORT(GetFfaBonusSecondsLeft());
+	MESSAGE_END();
+}
+
+void CHalfLifeMultiplay::UpdateFfaBonus()
+{
+	if (!IsFreeForAll())
+		return;
+
+	float interval = ffa_bonus_interval.value;
+	if (interval < 5.0f)
+		interval = 5.0f;
+
+	if (m_iFfaBonusWeapon == WEAPON_NONE || gpGlobals->time >= m_flFfaBonusRotateAt)
+	{
+		const int count = sizeof(s_ffaBonusPool) / sizeof(s_ffaBonusPool[0]);
+		int prev = m_iFfaBonusWeapon;
+		int pick = prev;
+
+		// re-roll so the weapon always changes (the visible timer reset stays meaningful)
+		do {
+			pick = s_ffaBonusPool[RANDOM_LONG(0, count - 1)];
+		} while (count > 1 && pick == prev);
+
+		m_iFfaBonusWeapon = pick;
+		m_flFfaBonusRotateAt = gpGlobals->time + interval;
+		m_iFfaBonusWindow++;
+	}
+
+	// Broadcast current state every periodic second (3 bytes; trivial, keeps late-joiners synced)
+	SendFfaBonus(nullptr);
+}
+
 LINK_HOOK_CLASS_VOID_CUSTOM_CHAIN2(CHalfLifeMultiplay, CSGameRules, Think)
 
 void EXT_FUNC CHalfLifeMultiplay::__API_HOOK(Think)()
@@ -2919,6 +2977,9 @@ void EXT_FUNC CHalfLifeMultiplay::__API_HOOK(Think)()
 		{
 			CheckRestartRound();
 			m_tmNextPeriodicThink = gpGlobals->time + 1.0f;
+
+			// CounterSol: rotate + broadcast the FFA bonus weapon (no-op outside FFA)
+			UpdateFfaBonus();
 
 			if (g_psv_accelerate->value != 5.0f)
 			{

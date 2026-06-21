@@ -746,6 +746,7 @@ public:
 #ifdef REGAMEDLL_ADD
 	WeaponIdType m_ffaSelectedPrimary;
 	WeaponIdType m_ffaSelectedSecondary;
+	int m_iFfaBonusTakenWindow;        // CounterSol: last FFA bonus window this player grabbed (-1 = none yet)
 #endif
 	float m_flDeathThrowTime;
 	int m_iThrowDirection;

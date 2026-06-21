@@ -6216,6 +6216,7 @@ void CBasePlayer::Reset()
 #ifdef REGAMEDLL_ADD
 	m_ffaSelectedPrimary = WEAPON_NONE;
 	m_ffaSelectedSecondary = WEAPON_NONE;
+	m_iFfaBonusTakenWindow = -1;
 #endif
 
 #ifdef REGAMEDLL_FIXES
@@ -10440,6 +10441,10 @@ void CBasePlayer::TeamChangeUpdate()
 LINK_HOOK_CLASS_CHAIN(bool, CBasePlayer, HasRestrictItem, (ItemID item, ItemRestType type), item, type)
 
 bool EXT_FUNC CBasePlayer::__API_HOOK(HasRestrictItem)(ItemID item, ItemRestType type) {
+	// CounterSol: auto-snipers can never be bought (still allowed via give/pickup for the future bonus-weapon feature)
+	if (type == ITEM_TYPE_BUYING && (item == (ItemID)WEAPON_G3SG1 || item == (ItemID)WEAPON_SG550))
+		return true;
+
 	return false;
 }
 
@@ -10594,6 +10599,7 @@ void CBasePlayer::Disconnect()
 #ifdef REGAMEDLL_ADD
 	m_ffaSelectedPrimary = WEAPON_NONE;
 	m_ffaSelectedSecondary = WEAPON_NONE;
+	m_iFfaBonusTakenWindow = -1;
 #endif
 
 	SetThink(nullptr);

@@ -23,6 +23,7 @@ int gmsgAmmoX = 0;
 int gmsgDeathMsg = 0;
 int gmsgScoreAttrib = 0;
 int gmsgScoreInfo = 0;
+int gmsgFfaBonus = 0;
 int gmsgAssistInfo = 0;
 int gmsgDeathStats = 0;
 int gmsgHitMarker = 0;
@@ -169,6 +170,7 @@ void LinkUserMessages()
 	gmsgDeathMsg      = REG_USER_MSG("DeathMsg", -1);
 	gmsgScoreAttrib   = REG_USER_MSG("ScoreAttrib", 2);
 	gmsgScoreInfo     = REG_USER_MSG("ScoreInfo", 9);
+	gmsgFfaBonus      = REG_USER_MSG("FfaBonus", 3);   // CounterSol: weaponId (byte) + secondsLeft (short)
 	gmsgAssistInfo    = REG_USER_MSG("AssistInfo", 3);
 	gmsgDeathStats    = REG_USER_MSG("DeathStats", -1);
 	gmsgHitMarker     = REG_USER_MSG("HitMarker", -1);
@@ -3697,6 +3699,28 @@ void EXT_FUNC InternalCommand(edict_t *pEntity, const char *pcmd, const char *pa
 				{
 					pPlayer->m_ffaSelectedPrimary = WEAPON_NONE;
 					pPlayer->m_ffaSelectedSecondary = WEAPON_NONE;
+				}
+			}
+			else if (FStrEq(pcmd, "cs_ffa_bonus_take"))
+			{
+				// CounterSol: equip the currently-advertised FFA bonus weapon (G key / tap on the HUD card).
+				// Once per rotation window per player; gives directly so it bypasses the buy restriction.
+				if (CSGameRules()->IsFreeForAll() && pPlayer->IsAlive())
+				{
+					int bonusWeapon = CSGameRules()->GetFfaBonusWeapon();
+					int bonusWindow = CSGameRules()->GetFfaBonusWindow();
+
+					if (bonusWeapon != WEAPON_NONE && pPlayer->m_iFfaBonusTakenWindow != bonusWindow)
+					{
+						WeaponInfoStruct *info = GetWeaponInfo(bonusWeapon);
+						if (info && info->entityName)
+						{
+							int slot = IsPrimaryWeapon(bonusWeapon) ? PRIMARY_WEAPON_SLOT : PISTOL_SLOT;
+							RemoveWeaponSlotForFfaBuy(pPlayer, slot);   // FFA-style: destroy the same-slot weapon (no drop)
+							pPlayer->GiveNamedItem(info->entityName);
+							pPlayer->m_iFfaBonusTakenWindow = bonusWindow;
+						}
+					}
 				}
 			}
 			else if (FStrEq(pcmd, "give"))

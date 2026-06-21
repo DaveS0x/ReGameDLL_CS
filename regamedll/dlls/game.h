@@ -152,6 +152,7 @@ extern cvar_t roundrespawn_time;
 extern cvar_t auto_reload_weapons;
 extern cvar_t refill_bpammo_weapons;
 extern cvar_t freeforall;
+extern cvar_t ffa_bonus_interval;
 extern cvar_t auto_join_team;
 extern cvar_t max_teamkills;
 extern cvar_t fraglimit;

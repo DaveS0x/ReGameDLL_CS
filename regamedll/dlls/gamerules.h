@@ -815,6 +815,13 @@ public:
 	bool IsFreeForAll() const;
 	bool CanPlayerBuy(CBasePlayer *pPlayer) const;
 
+	// CounterSol: FFA rotating bonus weapon
+	void UpdateFfaBonus();
+	void SendFfaBonus(CBasePlayer *pPlayer);  // pPlayer == nullptr -> broadcast (MSG_ALL)
+	int GetFfaBonusWeapon() const { return m_iFfaBonusWeapon; }
+	int GetFfaBonusWindow() const { return m_iFfaBonusWindow; }
+	int GetFfaBonusSecondsLeft() const;
+
 	VFUNC bool HasRoundTimeExpired();
 	VFUNC bool IsBombPlanted();
 
@@ -913,6 +920,10 @@ protected:
 	float m_flIntermissionStartTime;
 	BOOL m_iEndIntermissionButtonHit;
 	float m_tmNextPeriodicThink;
+	// CounterSol: FFA rotating bonus weapon state
+	int m_iFfaBonusWeapon;				// current bonus WeaponIdType (WEAPON_NONE when inactive)
+	float m_flFfaBonusRotateAt;			// gpGlobals->time at which the bonus rotates to a new weapon
+	int m_iFfaBonusWindow;				// monotonic window counter (used for the once-per-rotation take guard)
 	bool m_bGameStarted;				// TRUE = the game commencing when there is at least one CT and T, FALSE = scoring will not start until both teams have players (deprecated name m_bFirstConnected)
 	bool m_bInCareerGame;
 	float m_fCareerRoundMenuTime;
