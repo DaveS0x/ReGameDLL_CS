@@ -665,21 +665,61 @@ void CCSPlayer::RecordDamage(CBasePlayer *pAttacker, float flDamage, float flFla
 	// HP damage actually dealt.
 	CBasePlayer *pVictimPlayer = BasePlayer();
 	if (gmsgHitMarker
-		&& pAttacker->entindex() != pVictimPlayer->entindex()
-		&& !(pAttacker->pev->flags & FL_FAKECLIENT))
+		&& pAttacker->entindex() != pVictimPlayer->entindex())
 	{
 		const int remainingHealth = Q_max(0, int(pVictimPlayer->pev->health - flDamage));
 		int hitFlags = 0;
 		if (remainingHealth <= 0)
 			hitFlags |= (1 << 0); // killing blow
 
-		MESSAGE_BEGIN(MSG_ONE, gmsgHitMarker, nullptr, pAttacker->edict());
-			WRITE_BYTE(1);                                                        // payload version
-			WRITE_BYTE(pVictimPlayer->entindex());                               // victim index
-			WRITE_SHORT(Q_min(int(flDamage), 32767));                            // HP damage this hit
-			WRITE_BYTE(pVictimPlayer->m_LastHitGroup == HITGROUP_HEAD ? 1 : 0);  // headshot
-			WRITE_SHORT(remainingHealth);                                        // victim remaining HP
-			WRITE_BYTE(hitFlags);                                                // flags (bit0 = killing blow)
-		MESSAGE_END();
+		// Payload (see SendHitMarker / cl_dll MsgFunc_HitMarker for the wire format).
+		const int victimIndex = pVictimPlayer->entindex();
+		const int hpDamage     = Q_min(int(flDamage), 32767);
+		const int headshot     = pVictimPlayer->m_LastHitGroup == HITGROUP_HEAD ? 1 : 0;
+
+		// The attacker's OWN marker — humans only (bots can't render it).
+		if (!(pAttacker->pev->flags & FL_FAKECLIENT))
+		{
+			MESSAGE_BEGIN(MSG_ONE, gmsgHitMarker, nullptr, pAttacker->edict());
+				WRITE_BYTE(1);              // payload version
+				WRITE_BYTE(victimIndex);    // victim index
+				WRITE_SHORT(hpDamage);      // HP damage this hit
+				WRITE_BYTE(headshot);       // headshot
+				WRITE_SHORT(remainingHealth); // victim remaining HP
+				WRITE_BYTE(hitFlags);       // flags (bit0 = killing blow)
+			MESSAGE_END();
+		}
+
+		// Relay the same marker to anyone spectating the attacker, so a spectator
+		// sees their watched player's hit feedback. This runs for ANY attacker —
+		// crucially including BOTS — because spectators most often watch bots; the
+		// attacker self-send above is human-only, but the relay must not be. We
+		// relay to any observer mode locked onto the attacker (iuser2), not just
+		// OBS_IN_EYE, since the browser client's server-side observer mode is not
+		// reliably reported as in-eye. iuser2 == attackerIndex is only set for
+		// players actually observing the attacker, so live players never match.
+		// Iterate only the player slots (1..maxClients) rather than scanning the
+		// whole entity list per hit — observers are always players. The iuser2
+		// test short-circuits before the mode check since almost no player is
+		// observing this attacker on any given hit.
+		const int attackerIndex = pAttacker->entindex();
+		for (int i = 1; i <= gpGlobals->maxClients; i++)
+		{
+			CBasePlayer *pObserver = UTIL_PlayerByIndex(i);
+			if (!pObserver || pObserver->IsDormant())
+				continue;
+
+			if (pObserver->pev->iuser2 == attackerIndex && pObserver->GetObserverMode() != OBS_NONE)
+			{
+				MESSAGE_BEGIN(MSG_ONE, gmsgHitMarker, nullptr, pObserver->edict());
+					WRITE_BYTE(1);
+					WRITE_BYTE(victimIndex);
+					WRITE_SHORT(hpDamage);
+					WRITE_BYTE(headshot);
+					WRITE_SHORT(remainingHealth);
+					WRITE_BYTE(hitFlags);
+				MESSAGE_END();
+			}
+		}
 	}
 }
